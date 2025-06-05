@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Roland Garros</title>
+    <title>Uefa</title>
     <link rel="icon" type="image/x-icon" href="ico1.ico?v=2" />
     <link
       rel="stylesheet"
@@ -26,13 +26,14 @@
         <label for="useAdspower">Use adspower?</label>
         <input type="checkbox" id="useAdspower" name="useAdspower" />
       </div>
-      <div id="adspowerApiContainer" style="display: none">
-        <h3>Adspower API</h3>
+
+      <div id="initialLinkContainer" class="inputs">
+        <h3>Link</h3>
         <input
           type="text"
-          id="adspowerApi"
-          name="AdspowerApi"
-          placeholder="http://local.adspower.net:50325"
+          id="initialLink"
+          name="initialLink"
+          placeholder="https://womenseuro-resale.tickets.uefa.com/..."
         />
       </div>
       <div id="browserAmountContainer" class="inputs">
@@ -44,12 +45,49 @@
           placeholder="1-9999"
         />
       </div>
+      <div id="adspowerApiContainer" style="display: none">
+        <h3>Adspower API</h3>
+        <input
+          type="text"
+          id="adspowerApi"
+          name="AdspowerApi"
+          placeholder="http://local.adspower.net:50325"
+        />
+      </div>
+      <div id="reloadTimeContainer" class="inputs">
+        <h3>Reload time</h3>
+        <div id="reloadTimeInputContainer">
+          <input
+            type="number"
+            id="reloadTimeFrom"
+            name="reloadTimeFrom"
+            placeholder="45"
+          />
+          <input
+            type="number"
+            id="reloadTimeTo"
+            name="reloadTimeTo"
+            placeholder="60"
+          />
+        </div>
+      </div>
+      <div class="
       <div class="input google-sheets-data-link-input">
         <h3>Google Sheets Data Link</h3>
         <input
           type="text"
           id="googleSheetsDataLink"
           name="googleSheetsDataLink"
+          placeholder="https://docs.google.com/spreadsheets/d/1TFE2R..."
+        />
+      </div>
+
+      <div class="input google-sheets-accounts-link-input">
+        <h3>Google Sheets Accounts Link</h3>
+        <input
+          type="text"
+          id="googleSheetsAccountsLink"
+          name="googleSheetsAccountsLink"
           placeholder="https://docs.google.com/spreadsheets/d/1TFE2R..."
         />
       </div>
@@ -88,7 +126,6 @@
           const adspowerTextarea = adspowerInput.querySelector("textarea");
           const proxyInput = document.querySelector(".proxy-input");
           const proxyTextarea = proxyInput.querySelector("textarea");
-
           adspowerTextarea.value = "";
           proxyTextarea.value = "";
 
@@ -98,6 +135,7 @@
           const browserAmount = document.querySelector(
             "#browserAmountContainer"
           );
+
           const browserAmountInput = document.querySelector("#browserAmount");
 
           browserAmount.style.display = this.checked ? "none" : "block";
@@ -122,9 +160,21 @@
           const browsersAmount = parseInt(
             document.querySelector("#browserAmount").value
           );
+          const reloadTimeFrom =
+            document.querySelector("#reloadTimeFrom").value;
+          const reloadTimeTo = document.querySelector("#reloadTimeTo").value;
+          const reloadTime = Array(
+            parseInt(reloadTimeFrom) ? reloadTimeFrom : 45,
+            parseInt(reloadTimeTo) ? reloadTimeTo : 60
+          );
+          const initialLink = document.querySelector("#initialLink").value;
 
           const googleSheetsDataLinkInput = document.querySelector(
             "#googleSheetsDataLink"
+          ).value;
+
+          const googleSheetsAccountsLinkInput = document.querySelector(
+            "#googleSheetsAccountsLink"
           ).value;
 
           const rawAdspower = document.querySelector(
@@ -154,11 +204,14 @@
 
           closeWindow();
           await eel.start_workers(
+            initialLink,
             browsersAmount,
+            reloadTime,
             proxyList,
             adspowerApi,
             adspowerIds,
-            googleSheetsDataLinkInput
+            googleSheetsDataLinkInput,
+            googleSheetsAccountsLinkInput
           )();
         }
       }

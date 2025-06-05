@@ -12,6 +12,7 @@ import time
 import sys, os
 from utils.sheetsApi import GoogleSheetClient
 from asyncio import iscoroutine, iscoroutinefunction
+from utils.helpers import extract_domain
 import logging
 import json
 import asyncio
@@ -169,7 +170,7 @@ def post_request(data):
 
     # Send the POST request
     try:
-        response = requests.post(f"http://localhost:8000/book", data=json_data, headers=headers)
+        response = requests.post(f"http://localhost:8001/book", data=json_data, headers=headers)
         print(response)
     except Exception as e:
         print(e)
@@ -187,7 +188,7 @@ def parse_random_category(value):
         return list(map(int, value.split('-')))
     else:
         return [int(value)]
-    
+
 
 async def change_proxy(tab):
     try:
@@ -356,23 +357,41 @@ async def create_driver(open_url=None, proxy_list=None):
 
     # If using proxies, configure them on the main tab
     if proxy_list:
-        print(f"[DEBUG] Configuring proxies: {proxy_list}")
         tab = driver.main_tab
         await configure_proxy(tab, proxy_list)
 
     return driver
 
-async def login_if_captcha(page, username=None, password=None):
+async def is_available_matches_checked(page):
+    script = """
+    (function() {
+        return document.querySelector('#toggle_unavailable_matches').checked
+    }())
+    """
+    # await the promise, return the JS value directly
+    checkbox_value = await page.evaluate(
+        script,
+        await_promise=True,
+        return_by_value=True
+    )
+    return checkbox_value
+
+async def login_if_captcha(page):
     """
     If a login form is shown, fill in username/password. Otherwise, wait 10 seconds.
     """
     print("[DEBUG] Checking for login/captcha form…")
     try:
-        # Wait for the Gigya login form to appear
+        random_account_idx = random.randint(0, len(accounts) - 1)
+        username = accounts[random_account_idx][0]
+        password = accounts[random_account_idx][1]
+        print(username, password)
+
         form_selector = 'div.idp-static-page div.gigya-composite-control > input[name="username"]'
         username_el = await custom_wait(page, form_selector, timeout=5)
         if username_el and username and password:
             print("[DEBUG] Login form detected—filling credentials")
+            await username_el.clear_input()
             # Fill username
             for ch in username:
                 await username_el.send_keys(ch)
@@ -380,6 +399,7 @@ async def login_if_captcha(page, username=None, password=None):
             # Fill password
             pwd_selector = 'div.idp-static-page div.gigya-composite-control > input[name="password"]'
             password_el = await page.query_selector(pwd_selector)
+            await password_el.clear_input()
             for ch in password:
                 await password_el.send_keys(ch)
                 time.sleep(0.1)
@@ -389,6 +409,10 @@ async def login_if_captcha(page, username=None, password=None):
             await submit_el.mouse_click()
             print("[DEBUG] Submitted login form—waiting 2 seconds")
             time.sleep(2)
+            is_error = await check_for_element(page, 'div.idp-static-page div.gigya-composite-control > .gigya-error-msg-active')
+            if is_error:
+                print("Invalid account was passed, waiting for 60 sec to switch account")
+                time.sleep(60)
         else:
             print("[DEBUG] No login form or missing credentials—sleeping 10s")
             time.sleep(10)
@@ -419,28 +443,28 @@ async def handle_captcha_dialog(page):
     return False
 
 
-async def wait_for_initial_page(page, initial_link, username=None, password=None, browser_id=None):
+async def wait_for_initial_page(page, actual_link, browser_id=None):
     """
-    Navigate to initial_link and loop until we hit the “#isolated_header_iframe” marker.
+    Navigate to actual_link and loop until we hit the “#isolated_header_iframe” marker.
     Handle login and captcha as needed.
     Handle datadome if exists
     """
-    print(f"[DEBUG] Navigating to main page {initial_link}")
-    await page.get(initial_link)
-
+    print(f"[DEBUG] Navigating to main page {actual_link}")
+    await page.get(actual_link)
 
     # Loop until we find the “#isolated_header_iframe” marker
     while True:
         print("[DEBUG] Checking for main page load…")
         # First: check if login/captcha form is present
         if await custom_wait(page, '#root_content', timeout=5):
-            await login_if_captcha(page, username, password)
+            await login_if_captcha(page)
             continue
         if await custom_wait(page, 'iframe[src^="https://geo.captcha-delivery.com"]', timeout=2):
             user_part    = f"User: {os.getlogin()}."
             text = f"CAPTCHA"
             message = "\n".join([user_part + " " + browser_id, text])
-            send_slack_message(message)
+            print('message', message)
+            # send_slack_message(message)
             # print('trying to delete cookies')
             # delete_cookies('datadome')
             print(Fore.YELLOW + f"{browser_id}: CAPTCHA!\n")
@@ -455,7 +479,7 @@ async def wait_for_initial_page(page, initial_link, username=None, password=None
             break
 
     # Finally, re-navigate to the main page once more
-    await page.get(initial_link)
+    await page.get(actual_link)
     print("[DEBUG] Final navigation to initial link complete")
 
 
@@ -466,6 +490,7 @@ async def click_buy_and_inner_buttons(page):
     """
     print("[DEBUG] Attempting to click Buy buttons…")
     while True:
+        await reject_cookies(page)
         try:
             buy_button = await custom_wait(page, "a.btn-main", timeout=2)
             if buy_button:
@@ -473,7 +498,13 @@ async def click_buy_and_inner_buttons(page):
                 await buy_button.mouse_click()
         except Exception as e:
             print(f"[WARN] Error clicking main Buy button: {e}")
-
+        try:
+            link_to_move = await custom_wait(page, '#introduction > p > a:nth-child(2)', timeout=2)
+            if link_to_move:
+                print('[DEBUG] Found main Link - clicking')
+                await link_to_move.mouse_click()
+        except Exception as e:
+            print(f"[WARN] Error clicking Link: {e}")
         try:
             inner_button = await custom_wait(page, 'span.button.action_buttons_0', timeout=2)
             if inner_button:
@@ -537,7 +568,7 @@ async def select_random_match(page, match_list, reload_time):
         if not available:
             print("[DEBUG] No available match – reloading after sleep")
             time.sleep(random.randint(reload_time[0], reload_time[1]))
-            continue
+            return False
 
         # Pick a random match from the list of dicts
         choice = random.choice(available)
@@ -570,13 +601,14 @@ async def find_and_select_category(page, categories_dict, reload_time):
     # Check if all values in categories_dict are empty strings => treat as “take first available category”
     is_empty = all(value == '' for value in categories_dict.values())
 
-    while True:
+    for _ in range(0, 5):
         # Reload/back to ensure the table is loaded fresh
         await page.get()
         await page.back()
-        event_form = await custom_wait(page, '#event_form', timeout=60)
+        event_form = await custom_wait(page, '#event_form', timeout=2)
         if not event_form:
             print("[DEBUG] Event form not found – retrying")
+            time.sleep(random.randint(reload_time[0], reload_time[1]))
             continue
 
         table_rows = await page.query_selector_all('table > tbody > tr[data-conditionalrateid]')
@@ -614,8 +646,7 @@ async def find_and_select_category(page, categories_dict, reload_time):
             if compare_name in categories_dict:
                 desired_quantity_str = categories_dict[compare_name]
                 if not is_empty and desired_quantity_str == '':
-                    continue  # user said “don’t pick this category”
-                # Add to candidates: (row_handle, desired_quantity_str)
+                    continue 
                 candidate_options.append((row, desired_quantity_str))
 
         if not candidate_options:
@@ -623,14 +654,12 @@ async def find_and_select_category(page, categories_dict, reload_time):
             time.sleep(random.randint(reload_time[0], reload_time[1]))
             continue
 
-        # Randomly pick one of the candidate categories
         row_handle, qty_str = random.choice(candidate_options)
         print(f"[DEBUG] Selected category row with desired qty '{qty_str}'")
         await row_handle.scroll_into_view()
 
-        # Find the <select> and decide which <option> to pick
         select_el = await row_handle.query_selector('td.quantity > select')
-        parsed_values = parse_random_category(qty_str)  # e.g. "1-2" => [1,2]
+        parsed_values = parse_random_category(qty_str)
 
         option_to_select = None
         options_list = await select_el.query_selector_all('option')
@@ -653,9 +682,8 @@ async def find_and_select_category(page, categories_dict, reload_time):
             await option_to_select.scroll_into_view()
             await option_to_select.select_option()
             print(f"[DEBUG] Selected quantity option '{option_to_select.attrs.get('value')}'")
-            return select_el  # Return the <select> handle so caller can click “Book”
 
-        # If we got here, no valid option in this row—remove it and retry
+       
         print("[DEBUG] No valid quantity found in this category—retrying")
         candidate_options.remove((row_handle, qty_str))
         if not candidate_options:
@@ -677,6 +705,7 @@ async def finalize_booking(page, select_el):
     captcha_dialog = await custom_wait(page, '#captcha_dialog', timeout=5)
     if captcha_dialog:
         print("[DEBUG] Captcha dialog after booking—clicking continue…")
+        time.sleep(2)
         cont_invis = await custom_wait(captcha_dialog, '#captcha_dialog_continue_invisible', timeout=3)
         await cont_invis.scroll_into_view()
         await cont_invis.mouse_click()
@@ -727,54 +756,52 @@ async def finalize_booking(page, select_el):
     else:
         print("[WARN] Booking may have failed (no success message)")
 
+async def reject_cookies(page):
+    cookie_box = await custom_wait(page, 'div > #onetrust-reject-all-handler', timeout=3)
+    if cookie_box:
+        print("[DEBUG] Rejecting cookies…")
+        await cookie_box.mouse_click()
 
-async def main(browser_id, total_browsers, proxy_list=None, adspower_api=None, adspower_id=None):
+
+async def main(initial_link, browser_id, total_browsers, reload_time, proxy_list=None, adspower_api=None, adspower_id=None):
     """
     Top-level orchestration: set up driver, wait for initial page, click buy, select match & category, then finalize booking.
     """
-    reload_time = 45
     global data
     global accounts
     time.sleep(5)
     adspower_link = ""
     if adspower_api and adspower_id:
-        adspower_link = f"{adspower_id}/api/v1/browser/start?user_id={adspower_id}"
-    if accounts is None or not accounts:
-        print("[ERROR] No accounts available! Please check the Google Sheet link.")
-        return
-    random_account_idx = random.randint(0, len(accounts) - 1)
-    username = accounts[random_account_idx][0]
-    password = accounts[random_account_idx][1]
-    print(username, password)
-    initial_link = 'https://nationsleague.tickets.uefa.com/'
+        adspower_link = f"{adspower_api}/api/v1/browser/start?serial_number={adspower_id}"
+    
+    actual_link = extract_domain(initial_link)
+    print(' actual link')
     driver = await create_driver(open_url=adspower_link, proxy_list=proxy_list)
     page = driver.main_tab
     print(f"[DEBUG] Navigating to setup page for NopeCha…")
-    await page.get('https://nopecha.com/setup#sub_1NnGb4CRwBwvt6ptDqqrDlul|keys=|enabled=true|disabled_hosts=|hcaptcha_auto_open=true|hcaptcha_auto_solve=true|hcaptcha_solve_delay=true|hcaptcha_solve_delay_time=3000|recaptcha_auto_open=true|recaptcha_auto_solve=true|recaptcha_solve_delay=true|recaptcha_solve_delay_time=1000|funcaptcha_auto_open=true|funcaptcha_auto_solve=true|funcaptcha_solve_delay=true|funcaptcha_solve_delay_time=0|awscaptcha_auto_open=true|awscaptcha_auto_solve=true|awscaptcha_solve_delay=true|awscaptcha_solve_delay_time=0|turnstile_auto_solve=true|turnstile_solve_delay=true|turnstile_solve_delay_time=1000|perimeterx_auto_solve=false|perimeterx_solve_delay=true|perimeterx_solve_delay_time=1000|textcaptcha_auto_solve=true|textcaptcha_solve_delay=true|textcaptcha_solve_delay_time=0|textcaptcha_image_selector=#img_captcha|textcaptcha_input_selector=#secret|recaptcha_solve_method=Image')
+    await page.get('https://nopecha.com/setup#sub_1RWdSzCRwBwvt6ptKAX3W64k|keys=|enabled=true|disabled_hosts=|hcaptcha_auto_open=true|hcaptcha_auto_solve=true|hcaptcha_solve_delay=true|hcaptcha_solve_delay_time=3000|recaptcha_auto_open=true|recaptcha_auto_solve=true|recaptcha_solve_delay=true|recaptcha_solve_delay_time=1000|funcaptcha_auto_open=true|funcaptcha_auto_solve=true|funcaptcha_solve_delay=true|funcaptcha_solve_delay_time=0|awscaptcha_auto_open=true|awscaptcha_auto_solve=true|awscaptcha_solve_delay=true|awscaptcha_solve_delay_time=0|turnstile_auto_solve=true|turnstile_solve_delay=true|turnstile_solve_delay_time=1000|perimeterx_auto_solve=false|perimeterx_solve_delay=true|perimeterx_solve_delay_time=1000|textcaptcha_auto_solve=true|textcaptcha_solve_delay=true|textcaptcha_solve_delay_time=0|textcaptcha_image_selector=#img_captcha|textcaptcha_input_selector=#secret|recaptcha_solve_method=Image')
     browser_part = f"Browser: {adspower_id if adspower_id else browser_id}"
 
     while True:
         try:
-            await wait_for_initial_page(page, initial_link, username=username, password=password, browser_id=browser_part)
+            await wait_for_initial_page(page, actual_link, browser_id=browser_part)
 
             # Step: click buy buttons until performance container appears
             await click_buy_and_inner_buttons(page)
 
-            # Reject cookies if shown, toggle “unavailable matches” if present
-            cookie_box = await custom_wait(page, 'div > #onetrust-reject-all-handler', timeout=1)
-            if cookie_box:
-                print("[DEBUG] Rejecting cookies…")
-                await cookie_box.mouse_click()
+            await reject_cookies(page)
 
             toggle_checkbox = await custom_wait(page, "#toggle_unavailable_matches", timeout=1)
             if toggle_checkbox:
-                print("[DEBUG] Toggling ‘Show unavailable matches’ checkbox")
-                await toggle_checkbox.mouse_click()
-            
-            page = await page.get(initial_link)
-            await click_buy_and_inner_buttons(page)
+                is_checked = await is_available_matches_checked(page)
+                if is_checked:
+                    print("[DEBUG] Toggling ‘Display only available matches’ checkbox")
+                    await toggle_checkbox.mouse_click()
+                    time.sleep(1)
             # Step: choose a match
             selected_match_key = await select_random_match(page, data, reload_time)
+            if not selected_match_key:
+                continue
 
             # Step: get category dictionary for that match
             categories = await get_categories_for_match(data, selected_match_key)
@@ -822,7 +849,7 @@ def poll_sheet_every(interval: float, sheets_data_link: str, sheets_accounts_lin
 
 
 @eel.expose
-def start_workers(browsersAmount, proxyInput, adspowerApi,
+def start_workers(initial_link, browsersAmount, reload_time, proxyInput, adspowerApi,
     adspowerIds, googleSheetsDataLink=None, googleSheetsAccountsLink="https://docs.google.com/spreadsheets/d/1wP-xaf0NUIppb0hgVnhPUiihP-FfaT_WM82UQDEv4ms/edit?gid=0#gid=0"
 ):
     if googleSheetsAccountsLink:
@@ -834,7 +861,7 @@ def start_workers(browsersAmount, proxyInput, adspowerApi,
         polling_thread.start()
     
     threads = []
-    print('start_workers', browsersAmount, adspowerApi,
+    print('start_workers', initial_link, browsersAmount, reload_time, adspowerApi,
      adspowerIds, googleSheetsDataLink, googleSheetsAccountsLink)
 
     # Case: using adspower API
@@ -846,7 +873,7 @@ def start_workers(browsersAmount, proxyInput, adspowerApi,
             thread = threading.Thread(
                 target=lambda idx=i, tot=total, aid=ads_id:
                     uc.loop().run_until_complete(
-                        main(idx, tot, proxyInput, adspowerApi, aid)
+                        main(initial_link, idx, tot, reload_time, proxyInput, adspowerApi, aid)
                     )
             )
             threads.append(thread)
@@ -860,7 +887,7 @@ def start_workers(browsersAmount, proxyInput, adspowerApi,
             thread = threading.Thread(
                 target=lambda idx=i, tot=total:
                     uc.loop().run_until_complete(
-                        main(idx, tot, proxyInput,)
+                        main(initial_link, idx, tot, reload_time, proxyInput,)
                     )
             )
             threads.append(thread)
