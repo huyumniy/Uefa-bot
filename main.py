@@ -1,9 +1,5 @@
 import os
 import json
-import ast
-from urllib.parse import urlparse
-import tempfile
-import nodriver
 import requests
 import nodriver as uc
 import random
@@ -11,27 +7,25 @@ from nodriver import cdp
 import shutil
 import sounddevice as sd
 import soundfile as sf
-import re
-import undetected_chromedriver
 import threading
-from pyshadow.main import Shadow
 import time
 import sys, os
-from twocaptcha import TwoCaptcha
-from pydub import AudioSegment 
-from nodriver.cdp.dom import Node
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+from utils.sheetsApi import GoogleSheetClient
 from asyncio import iscoroutine, iscoroutinefunction
 import logging
 import json
 import asyncio
 import itertools
+import socket
+import eel
+import re
+from colorama import init, Fore
 
+init(autoreset=True)
 logger = logging.getLogger("uc.connection")
+
+accounts = []
+data = []
 
 async def listener_loop(self):
     while True:
@@ -125,172 +119,6 @@ async def listener_loop(self):
 def uc_fix(uc: uc):
     uc.core.connection.Listener.listener_loop = listener_loop
 
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-
-SPREADSHEET_ID = '12Leg4iVj2rKwloYfrHWQZL9vRt1jwPgn2hBFdNsHB_o'
-
-
-class ProxyExtension:
-    manifest_json = """
-    {
-        "version": "1.0.0",
-        "manifest_version": 2,
-        "name": "Chrome Proxy",
-        "permissions": [
-            "proxy",
-            "tabs",
-            "unlimitedStorage",
-            "storage",
-            "<all_urls>",
-            "webRequest",
-            "webRequestBlocking"
-        ],
-        "background": {"scripts": ["background.js"]},
-        "minimum_chrome_version": "76.0.0"
-    }
-    """
-
-    background_js = """
-    var config = {
-        mode: "fixed_servers",
-        rules: {
-            singleProxy: {
-                scheme: "http",
-                host: "%s",
-                port: %d
-            },
-            bypassList: ["localhost"]
-        }
-    };
-
-    chrome.proxy.settings.set({value: config, scope: "regular"}, function() {});
-
-    function callbackFn(details) {
-        return {
-            authCredentials: {
-                username: "%s",
-                password: "%s"
-            }
-        };
-    }
-
-    chrome.webRequest.onAuthRequired.addListener(
-        callbackFn,
-        { urls: ["<all_urls>"] },
-        ['blocking']
-    );
-    """
-
-    def __init__(self, host, port, user, password):
-        self._dir = os.path.normpath(tempfile.mkdtemp())
-
-        manifest_file = os.path.join(self._dir, "manifest.json")
-        with open(manifest_file, mode="w") as f:
-            f.write(self.manifest_json)
-
-        background_js = self.background_js % (host, port, user, password)
-        background_file = os.path.join(self._dir, "background.js")
-        with open(background_file, mode="w") as f:
-            f.write(background_js)
-
-    @property
-    def directory(self):
-        return self._dir
-
-    def __del__(self):
-        shutil.rmtree(self._dir)
-    
-
-def download_wav(url, file_name):
-    response = requests.get(url)
-
-    # Check if the request was successful
-    if response.status_code == 200:
-        # Write the content of the response to a file
-        with open(file_name, 'wb') as file:
-            file.write(response.content)
-        print(f"File downloaded successfully and saved as {file_name}")
-    else:
-        print(f"Failed to download the file. Status code: {response.status_code}")
-
-
-def extract_numbers(code):
-    # Define a mapping of number words to digits
-    number_map = {
-        "zero": "0", "one": "1", "on":"1", "two": "2", "to":"2", "three": "3", "tree": "3", "four": "4",
-        "five": "5","fi":"5", "six": "6", "seven": "7", "eight": "8", "nine": "9"
-    }
-    
-    # Use regex to find all number words in the code
-    words = re.findall(r'\b(?:' + '|'.join(number_map.keys()) + r')\b', code)
-    
-    # Convert the words to their corresponding digits and join them
-    result = ''.join(number_map[word] for word in words)
-    
-    return result
-
-
-async def wait_for_captcha(page, driver):
-    try:
-        for i in range(1, 4):
-            # iframe = await page.query_selector('')
-            # print(iframe)
-            # iframe_id = iframe.node_id
-            # print(iframe_id)
-            # el = await page.find('Ми хочемо переконатися, що це справді ви, а не робот.')
-            # id =  await page.send(cdp.dom.perform_search('html'))
-            iframe = await custom_wait(page, "iframe")
-            # Get required tab. Not safe in case when tab not found
-            iframe_tab: uc.Tab = next(
-                filter(
-                    lambda x: str(x.target.target_id) == str(iframe.frame_id), driver.targets
-                )
-            )
-            # Fixing websocket url
-            iframe_tab.websocket_url = iframe_tab.websocket_url.replace("iframe", "page")
-            button = await iframe_tab.select(
-                'button[id="captcha__audio__button"]'
-            )
-            await button.click()
-            audio = await iframe_tab.select('audio[src]')
-            print(audio)
-            audio_attrs = audio.attrs
-            audio_src = audio_attrs['src']
-            print(audio_src)
-            captcha_id = random.randint(1, 99)
-            input_file = f"captcha{captcha_id}.wav"
-            output_file = f"captcha{captcha_id}.mp3"
-            download_wav(audio_src, input_file)
-            sound = AudioSegment.from_wav(input_file) 
-            sound.export(output_file, format="mp3")
-            # el = await page.send(cdp.dom.Node.shadow_root_type(iframe))
-            
-            # print(audio_link)
-            solver = TwoCaptcha('29ada3bf8a7df98cfa4265ea1145c77b')
-            result = solver.audio(f'./{output_file}', lang='en')
-            play_button = await iframe_tab.select('button[class="audio-captcha-play-button push-button"]')
-            await play_button.click()
-            time.sleep(6)
-            print(result['code'])
-            numbers = extract_numbers(result['code'])
-            print(numbers)
-            os.remove(input_file)
-            os.remove(output_file)
-            time.sleep(5)
-            # govna = await iframe_tab.query_selector('div[class="audio-captcha-input-container"]')
-            # await govna.send_keys(numbers)
-            audio_input = await iframe_tab.query_selector_all('input[class="audio-captcha-inputs"]')
-            print(audio_input)
-            for i in range(0, 6):
-                audio_input_el = await audio_input[i]
-                await audio_input_el.focus()
-                await audio_input_el.send_keys(numbers[i]) 
-                time.sleep(1)
-            # await audio_input.send_keys(numbers)
-            time.sleep(20)
-    except Exception as e:
-        print('wait for captcha', e)
-
 
 async def custom_wait(page, selector, timeout=10):
     for _ in range(0, timeout):
@@ -328,46 +156,6 @@ async def check_for_element(page, selector, click=False, debug=False):
         return False
     
 
-def get_data_from_google_sheets():
-    try:
-        # Authenticate with Google Sheets API using the credentials file
-        creds = None
-        if os.path.exists("token.json"):
-            creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
-                creds = flow.run_local_server(port=0)
-
-            with open("token.json", "w") as token:
-                token.write(creds.to_json())
-
-        # Connect to Google Sheets API
-        service = build("sheets", "v4", credentials=creds)
-
-        # Define the range to fetch (assuming the data is in the first worksheet and starts from cell A2)
-        range_name = "main!A2:I"
-
-        # Fetch the data using batchGet
-        request = service.spreadsheets().values().batchGet(spreadsheetId=SPREADSHEET_ID, ranges=[range_name])
-        response = request.execute()
-
-        # Extract the values from the response
-        values = response['valueRanges'][0]['values']
-
-        return values
-
-    except HttpError as error:
-        print(f"An HTTP error occurred: {error}")
-        return None
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        return None
-    
-
 def post_request(data):
     try:
         json_data = json.dumps(data)
@@ -400,8 +188,6 @@ def parse_random_category(value):
     else:
         return [int(value)]
     
-
-
 
 async def change_proxy(tab):
     try:
@@ -537,7 +323,7 @@ async def create_driver(open_url=None, proxy_list=None):
 
     # Build nodriver.Config
     if host and port:
-        config = nodriver.Config(
+        config = uc.Config(
             user_data_dir=None,
             headless=False,
             browser_executable_path=None,
@@ -549,7 +335,7 @@ async def create_driver(open_url=None, proxy_list=None):
         )
         print(f"[DEBUG] Using remote Selenium at {host}:{port}")
     else:
-        config = nodriver.Config(
+        config = uc.Config(
             user_data_dir=None,
             headless=False,
             browser_executable_path=None,
@@ -633,7 +419,7 @@ async def handle_captcha_dialog(page):
     return False
 
 
-async def wait_for_initial_page(page, initial_link, username=None, password=None):
+async def wait_for_initial_page(page, initial_link, username=None, password=None, browser_id=None):
     """
     Navigate to initial_link and loop until we hit the “#isolated_header_iframe” marker.
     Handle login and captcha as needed.
@@ -652,13 +438,12 @@ async def wait_for_initial_page(page, initial_link, username=None, password=None
             continue
         if await custom_wait(page, 'iframe[src^="https://geo.captcha-delivery.com"]', timeout=2):
             user_part    = f"User: {os.getlogin()}."
-            browser_part = f"Browser: {adspower_id if adspower_id else browser_id}"
             text = f"CAPTCHA"
-            message = "\n".join([user_part + " " + browser_part, text])
+            message = "\n".join([user_part + " " + browser_id, text])
             send_slack_message(message)
             # print('trying to delete cookies')
             # delete_cookies('datadome')
-            print(Fore.YELLOW + f"Browser {adspower_id if adspower_id else browser_id}: 403!\n")
+            print(Fore.YELLOW + f"{browser_id}: CAPTCHA!\n")
 
         # Second: check for standalone captcha form
         if await handle_captcha_dialog(page):
@@ -943,21 +728,34 @@ async def finalize_booking(page, select_el):
         print("[WARN] Booking may have failed (no success message)")
 
 
-async def main(i, data, reload_time, username=None, password=None, proxy_list=None, adspower_api=None, adspower_id=None):
+async def main(browser_id, total_browsers, proxy_list=None, adspower_api=None, adspower_id=None):
     """
     Top-level orchestration: set up driver, wait for initial page, click buy, select match & category, then finalize booking.
     """
+    reload_time = 45
+    global data
+    global accounts
+    time.sleep(5)
+    adspower_link = ""
     if adspower_api and adspower_id:
-        adspower_link = f"{adspower}/api/v1/browser/start?user_id={adspower_id}"
+        adspower_link = f"{adspower_id}/api/v1/browser/start?user_id={adspower_id}"
+    if accounts is None or not accounts:
+        print("[ERROR] No accounts available! Please check the Google Sheet link.")
+        return
+    random_account_idx = random.randint(0, len(accounts) - 1)
+    username = accounts[random_account_idx][0]
+    password = accounts[random_account_idx][1]
+    print(username, password)
     initial_link = 'https://nationsleague.tickets.uefa.com/'
     driver = await create_driver(open_url=adspower_link, proxy_list=proxy_list)
+    page = driver.main_tab
     print(f"[DEBUG] Navigating to setup page for NopeCha…")
     await page.get('https://nopecha.com/setup#sub_1NnGb4CRwBwvt6ptDqqrDlul|keys=|enabled=true|disabled_hosts=|hcaptcha_auto_open=true|hcaptcha_auto_solve=true|hcaptcha_solve_delay=true|hcaptcha_solve_delay_time=3000|recaptcha_auto_open=true|recaptcha_auto_solve=true|recaptcha_solve_delay=true|recaptcha_solve_delay_time=1000|funcaptcha_auto_open=true|funcaptcha_auto_solve=true|funcaptcha_solve_delay=true|funcaptcha_solve_delay_time=0|awscaptcha_auto_open=true|awscaptcha_auto_solve=true|awscaptcha_solve_delay=true|awscaptcha_solve_delay_time=0|turnstile_auto_solve=true|turnstile_solve_delay=true|turnstile_solve_delay_time=1000|perimeterx_auto_solve=false|perimeterx_solve_delay=true|perimeterx_solve_delay_time=1000|textcaptcha_auto_solve=true|textcaptcha_solve_delay=true|textcaptcha_solve_delay_time=0|textcaptcha_image_selector=#img_captcha|textcaptcha_input_selector=#secret|recaptcha_solve_method=Image')
+    browser_part = f"Browser: {adspower_id if adspower_id else browser_id}"
 
     while True:
         try:
-            page = driver.main_tab
-            await wait_for_initial_page(page, initial_link, username=username, password=password)
+            await wait_for_initial_page(page, initial_link, username=username, password=password, browser_id=browser_part)
 
             # Step: click buy buttons until performance container appears
             await click_buy_and_inner_buttons(page)
@@ -994,3 +792,107 @@ async def main(i, data, reload_time, username=None, password=None, proxy_list=No
         except Exception as e:
             print(f"[ERROR] main encountered exception: {e}")
             time.sleep(60)
+
+
+def poll_sheet_every(interval: float, sheets_data_link: str, sheets_accounts_link: str):
+    """
+    Poll the Google Sheet every `interval` seconds.
+    """
+    global accounts
+    global data
+    
+    data_client = GoogleSheetClient(sheets_data_link, "main")
+    accounts_client = GoogleSheetClient(sheets_accounts_link, "main")
+     
+    while True:
+        try:
+            data_response = data_client.fetch_sheet_data()
+            accounts_response = accounts_client.fetch_sheet_columns("A2:B")
+            print(data_response, accounts_response)
+            if not data_response or not accounts_response:
+                print(f"Data or accounts response is empty, retrying in {interval} seconds...") 
+                time.sleep(interval)
+                continue
+            
+            data = data_response
+            accounts = accounts_response
+        except Exception as e:
+            print(f"Error fetching sheet data: {e!r}")
+        time.sleep(interval)
+
+
+@eel.expose
+def start_workers(browsersAmount, proxyInput, adspowerApi,
+    adspowerIds, googleSheetsDataLink=None, googleSheetsAccountsLink="https://docs.google.com/spreadsheets/d/1wP-xaf0NUIppb0hgVnhPUiihP-FfaT_WM82UQDEv4ms/edit?gid=0#gid=0"
+):
+    if googleSheetsAccountsLink:
+        polling_thread = threading.Thread(
+            target=poll_sheet_every,
+            args=(60.0, googleSheetsDataLink, googleSheetsAccountsLink),
+            daemon=True 
+        )
+        polling_thread.start()
+    
+    threads = []
+    print('start_workers', browsersAmount, adspowerApi,
+     adspowerIds, googleSheetsDataLink, googleSheetsAccountsLink)
+
+    # Case: using adspower API
+    if not browsersAmount and all([adspowerApi, adspowerIds]):
+        total = len(adspowerIds)
+        for i in range(1, total + 1):
+            ads_id = adspowerIds[i - 1]
+            # bind i, total, ads_id into lambda defaults
+            thread = threading.Thread(
+                target=lambda idx=i, tot=total, aid=ads_id:
+                    uc.loop().run_until_complete(
+                        main(idx, tot, proxyInput, adspowerApi, aid)
+                    )
+            )
+            threads.append(thread)
+            thread.start()
+
+    # Case: fixed number of browsers
+    elif browsersAmount and not any([adspowerApi, adspowerIds]):
+        total = int(browsersAmount)
+        for i in range(1, total + 1):
+            # bind i, total into lambda defaults
+            thread = threading.Thread(
+                target=lambda idx=i, tot=total:
+                    uc.loop().run_until_complete(
+                        main(idx, tot, proxyInput,)
+                    )
+            )
+            threads.append(thread)
+            thread.start()
+
+    # Wait for all to finish
+    for thread in threads:
+        thread.join()
+
+
+def is_port_open(host, port):
+  try:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(1)
+    sock.connect((host, port))
+    return True
+  except (socket.timeout, ConnectionRefusedError):
+    return False
+  finally:
+    sock.close()
+
+
+if __name__ == "__main__":
+    eel.init('gui')
+
+    port = 8000
+    while True:
+        try:
+            if not is_port_open('localhost', port):
+                eel.start('main.html', size=(600, 800), port=port)
+                break
+            else:
+                port += 1
+        except OSError as e:
+            print(e)
