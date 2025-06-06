@@ -680,6 +680,7 @@ async def find_and_select_category(page, categories_dict, reload_time):
             await option_to_select.scroll_into_view()
             await option_to_select.select_option()
             print(f"[DEBUG] Selected quantity option '{option_to_select.attrs.get('value')}'")
+            return select_el
 
        
         print("[DEBUG] No valid quantity found in this category—retrying")
