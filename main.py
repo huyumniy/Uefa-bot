@@ -608,7 +608,6 @@ async def find_and_select_category(page, categories_dict, reload_time):
         event_form = await custom_wait(page, '#event_form', timeout=2)
         if not event_form:
             print("[DEBUG] Event form not found – retrying")
-            time.sleep(random.randint(reload_time[0], reload_time[1]))
             continue
 
         table_rows = await page.query_selector_all('table > tbody > tr[data-conditionalrateid]')
