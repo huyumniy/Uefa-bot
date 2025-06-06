@@ -234,6 +234,7 @@ async def change_proxy(tab):
 async def configure_proxy(tab, proxyList):
     try:
         await tab.get('chrome://extensions/')
+        time.sleep(2)
         script = """
                 (async () => {let data = await chrome.management.getAll(); return data;})();
         """
