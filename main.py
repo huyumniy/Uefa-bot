@@ -315,11 +315,11 @@ async def create_driver(open_url=None, proxy_list=None):
     if open_url:
         print(f"[DEBUG] Fetching remote Selenium info from {open_url}")
         resp = requests.get(open_url).json()
-        if resp.get("code", 1) != 0:
-            print(f"[ERROR] {resp.get('msg', 'Unknown error')} – please check ads_id")
-            sys.exit(1)
-        host_port = resp['data']['ws']['selenium']
-        host, port = host_port.split(':')
+        if resp["code"] != 0:
+            print(resp["msg"])
+            print("please check ads_id")
+            sys.exit()
+        host, port = resp['data']['ws']['selenium'].split(':')
 
     # Build nodriver.Config
     if host and port:
