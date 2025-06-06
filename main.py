@@ -4,7 +4,6 @@ import requests
 import nodriver as uc
 import random
 from nodriver import cdp
-import shutil
 import sounddevice as sd
 import soundfile as sf
 import threading
@@ -19,7 +18,6 @@ import asyncio
 import itertools
 import socket
 import eel
-import re
 from colorama import init, Fore
 
 init(autoreset=True)
@@ -806,6 +804,7 @@ async def main(initial_link, browser_id, total_browsers, reload_time, proxy_list
             categories = await get_categories_for_match(data, selected_match_key)
             if categories is None:
                 print(f"[ERROR] Could not find categories for match {selected_match_key}")
+                time.sleep(random.randint(reload_time[0], reload_time[1]))
                 return
 
             # Step: find and select a category/quantity
@@ -815,6 +814,7 @@ async def main(initial_link, browser_id, total_browsers, reload_time, proxy_list
                 await finalize_booking(page, select_el)
             else:
                 print("[WARN] No category was ever selected—exiting main loop")
+                time.sleep(random.randint(reload_time[0], reload_time[1]))
         except Exception as e:
             print(f"[ERROR] main encountered exception: {e}")
             time.sleep(60)
