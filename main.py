@@ -680,6 +680,7 @@ async def find_and_select_category(page, categories_dict, reload_time):
             await option_to_select.scroll_into_view()
             await option_to_select.select_option()
             print(f"[DEBUG] Selected quantity option '{option_to_select.attrs.get('value')}'")
+            return select_el
 
        
         print("[DEBUG] No valid quantity found in this category—retrying")
@@ -810,6 +811,7 @@ async def main(initial_link, browser_id, total_browsers, reload_time, proxy_list
 
             # Step: find and select a category/quantity
             select_el = await find_and_select_category(page, categories, reload_time)
+            print(select_el, 'select_el')
             if select_el:
                 # Step: finalize booking
                 await finalize_booking(page, select_el)
