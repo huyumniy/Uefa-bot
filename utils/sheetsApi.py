@@ -164,6 +164,10 @@ class GoogleSheetClient:
                 categories[header_name] = str(parsed) if (parsed is not None) else ""
             else:
                 categories[header_name] = ""
+
+        # If all category values are empty, skip this row
+        if not any(value != "" for value in categories.values()):
+            return None
         return match_val, categories
 
     def _fetch_sheet_json(self, cell_range: str) -> dict:

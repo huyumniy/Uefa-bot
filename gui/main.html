@@ -92,6 +92,17 @@
         />
       </div>
 
+      <div class="input checkbox-input slackPushDesiredMatch">
+        <label for="slackPushDesiredMatch"
+          >Надсилати пуш в слак, якщо знайдено матч</label
+        >
+        <input
+          type="checkbox"
+          id="slackPushDesiredMatch"
+          name="slackPushDesiredMatch"
+        />
+      </div>
+
       <!-- Proxy Input -->
       <div class="inputs proxy-input">
         <h3>Proxy input:</h3>
@@ -198,6 +209,9 @@
           const adspowerRadio = document.querySelector(
             'input[name="isAdspower"]:checked'
           );
+          const slackPushDesiredMatch = document.querySelector(
+            'input[name="slackPushDesiredMatch"]'
+          ).checked;
           const useAdspower = adspowerRadio
             ? adspowerRadio.id === "isAdspower"
             : false;
@@ -207,6 +221,7 @@
             initialLink,
             browsersAmount,
             reloadTime,
+            slackPushDesiredMatch,
             proxyList,
             adspowerApi,
             adspowerIds,

@@ -203,4 +203,4 @@ credentials.json
 token.json
 
 .DS_Store
-slack-post/
+slack_token.json

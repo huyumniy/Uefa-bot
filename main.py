@@ -179,6 +179,24 @@ def post_request(data):
         print("POST request failed.")
 
 
+def send_slack_message(data):
+    try:
+        json_data = json.dumps({"data": data})
+        headers = {
+            "Content-Type": "application/json"
+        }
+        try:
+            response = requests.post("http://localhost:8010/book", data=json_data, headers=headers)
+            if response.status_code == 200:
+                print("POST request successful!")
+            else:
+                raise Exception("POST request failed with status code: " + str(response.status_code))
+        except Exception as e:
+            print(e)
+    except Exception as e:
+        print(e)
+
+
 def parse_random_category(value):
     if value == '':
         return ['']
@@ -362,18 +380,21 @@ async def create_driver(open_url=None, proxy_list=None):
     return driver
 
 async def is_available_matches_checked(page):
-    script = """
-    (function() {
-        return document.querySelector('#toggle_unavailable_matches').checked
-    }())
-    """
-    # await the promise, return the JS value directly
-    checkbox_value = await page.evaluate(
-        script,
-        await_promise=True,
-        return_by_value=True
-    )
-    return checkbox_value
+    try:
+        script = """
+        (function() {
+            return document.querySelector('#toggle_unavailable_matches').checked
+        }())
+        """
+        # await the promise, return the JS value directly
+        checkbox_value = await page.evaluate(
+            script,
+            await_promise=True,
+            return_by_value=True
+        )
+        return checkbox_value
+    except:
+        return False
 
 async def login_if_captcha(page):
     """
@@ -463,7 +484,7 @@ async def wait_for_initial_page(page, actual_link, browser_id=None):
             text = f"CAPTCHA"
             message = "\n".join([user_part + " " + browser_id, text])
             print('message', message)
-            # send_slack_message(message)
+            send_slack_message(message)
             # print('trying to delete cookies')
             # delete_cookies('datadome')
             print(Fore.YELLOW + f"{browser_id}: CAPTCHA!\n")
@@ -762,7 +783,11 @@ async def reject_cookies(page):
         await cookie_box.mouse_click()
 
 
-async def main(initial_link, browser_id, total_browsers, reload_time, proxy_list=None, adspower_api=None, adspower_id=None):
+async def main(
+    initial_link, browser_id, total_browsers,
+    reload_time, slack_push_desired_match=None, proxy_list=None,
+    adspower_api=None, adspower_id=None
+):
     """
     Top-level orchestration: set up driver, wait for initial page, click buy, select match & category, then finalize booking.
     """
@@ -795,12 +820,18 @@ async def main(initial_link, browser_id, total_browsers, reload_time, proxy_list
                 is_checked = await is_available_matches_checked(page)
                 if is_checked:
                     print("[DEBUG] Toggling ‘Display only available matches’ checkbox")
-                    await toggle_checkbox.mouse_click()
+                    await check_for_element(page, '#toggle_unavailable_matches', True)
                     time.sleep(1)
             # Step: choose a match
             selected_match_key = await select_random_match(page, data, reload_time)
             if not selected_match_key:
                 continue
+            #TODO: implement slack push if there's a desired match and active checkbox from gui
+            if slack_push_desired_match:
+                user_part    = f"User: {os.getlogin()}."
+                text = f"З'явився матч: {selected_match_key}, {actual_link}"
+                message = "\n".join([user_part + " " + browser_part, text])
+                send_slack_message(message)
 
             # Step: get category dictionary for that match
             categories = await get_categories_for_match(data, selected_match_key)
@@ -851,8 +882,9 @@ def poll_sheet_every(interval: float, sheets_data_link: str, sheets_accounts_lin
 
 
 @eel.expose
-def start_workers(initial_link, browsersAmount, reload_time, proxyInput, adspowerApi,
-    adspowerIds, googleSheetsDataLink=None, googleSheetsAccountsLink="https://docs.google.com/spreadsheets/d/1wP-xaf0NUIppb0hgVnhPUiihP-FfaT_WM82UQDEv4ms/edit?gid=0#gid=0"
+def start_workers(initial_link, browsersAmount, reload_time,
+    slack_push_desired_match, proxyInput, adspowerApi, 
+    adspowerIds, googleSheetsDataLink=None, googleSheetsAccountsLink=None,
 ):
     if googleSheetsAccountsLink:
         polling_thread = threading.Thread(
@@ -863,8 +895,9 @@ def start_workers(initial_link, browsersAmount, reload_time, proxyInput, adspowe
         polling_thread.start()
     
     threads = []
-    print('start_workers', initial_link, browsersAmount, reload_time, adspowerApi,
-     adspowerIds, googleSheetsDataLink, googleSheetsAccountsLink)
+    print('start_workers', initial_link, browsersAmount, reload_time,
+     slack_push_desired_match, adspowerApi,adspowerIds,
+     googleSheetsDataLink, googleSheetsAccountsLink)
 
     # Case: using adspower API
     if not browsersAmount and all([adspowerApi, adspowerIds]):
@@ -875,7 +908,7 @@ def start_workers(initial_link, browsersAmount, reload_time, proxyInput, adspowe
             thread = threading.Thread(
                 target=lambda idx=i, tot=total, aid=ads_id:
                     uc.loop().run_until_complete(
-                        main(initial_link, idx, tot, reload_time, proxyInput, adspowerApi, aid)
+                        main(initial_link, idx, tot, reload_time, slack_push_desired_match, proxyInput, adspowerApi, aid)
                     )
             )
             threads.append(thread)
@@ -889,7 +922,7 @@ def start_workers(initial_link, browsersAmount, reload_time, proxyInput, adspowe
             thread = threading.Thread(
                 target=lambda idx=i, tot=total:
                     uc.loop().run_until_complete(
-                        main(initial_link, idx, tot, reload_time, proxyInput,)
+                        main(initial_link, idx, tot, reload_time, slack_push_desired_match, proxyInput,)
                     )
             )
             threads.append(thread)

@@ -63,6 +63,15 @@ input {
   width: 16px;
 }
 
+.checkbox-input {
+  display: flex;
+  align-items: center;
+}
+
+.checkbox-input input {
+  height: fit-content;
+}
+
 .buttons {
   display: flex;
   gap: 15px;
