@@ -10,6 +10,7 @@ import threading
 import time
 import sys, os
 from utils.sheetsApi import GoogleSheetClient
+from utils.helpers import filter_by_dict_value
 from asyncio import iscoroutine, iscoroutinefunction
 from utils.helpers import extract_domain
 import logging
@@ -149,6 +150,14 @@ async def check_for_element(page, selector, click=False, debug=False):
         element = await page.query_selector(selector)
         if click:
             await element.click()
+        return element
+    except Exception as e:
+        if debug: print("selector", selector, '\n', e)
+        return False
+    
+async def check_for_elements(page, selector, debug=False):
+    try:
+        element = await page.query_selector_all(selector)
         return element
     except Exception as e:
         if debug: print("selector", selector, '\n', e)
@@ -610,6 +619,17 @@ async def get_categories_for_match(match_list, selected_match_key):
     return None
 
 
+async def define_page_type(page):
+    event_form = await custom_wait(page, '#event_form', timeout=2)
+    resale_form = await custom_wait(page, '#ResaleItemFormModel', timeout=2)
+    
+    page_type = None
+
+    if event_form: page_type = 'event_form'
+    elif resale_form: page_type = 'resale_form'
+    return page_type
+
+
 async def find_and_select_category(page, categories_dict, reload_time):
     """
     On the event page, scan the “table > tbody > tr[data-conditionalrateid]” elements to find 
@@ -625,10 +645,6 @@ async def find_and_select_category(page, categories_dict, reload_time):
         # Reload/back to ensure the table is loaded fresh
         await page.get()
         await page.back()
-        event_form = await custom_wait(page, '#event_form', timeout=2)
-        if not event_form:
-            print("[DEBUG] Event form not found – retrying")
-            continue
 
         table_rows = await page.query_selector_all('table > tbody > tr[data-conditionalrateid]')
         if not table_rows:
@@ -711,6 +727,64 @@ async def find_and_select_category(page, categories_dict, reload_time):
             time.sleep(random.randint(reload_time[0], reload_time[1]))
             continue
 
+
+
+async def find_and_select_category_resale(page, categories_dict, reload_time):
+    print('find and select category resale')
+    global data, accounts, seat_select, seats, seats2, \
+    seat_selected, seat_selected_2, stadium, stadium_category
+
+    is_empty = all(value == '' for value in categories_dict.values())
+    if is_empty: return False
+
+    categories_legend = await check_for_elements(page, '.seat-info-category-legend')
+    categories_checkbox = await check_for_elements(page, 'input[type="checkbox"]')
+
+    categories_name = [(await check_for_element(category_legend, 'p > label > span:nth-child(2)')).text for category_legend in categories_legend]
+
+    # mapping
+    category_name_to_color_hex = {
+        (await check_for_element(category_legend, 'p > label > span:nth-child(2)')).text:
+        (await check_for_element(category_legend, 'p > label > span:nth-child(1)')).attrs.get('style').split(':')[1]
+        for category_legend in categories_legend
+    }
+    category_name_to_linear_gradient_id = {
+        (await check_for_element(category_legend, 'p > label > span:nth-child(2)')).text:
+        (await check_for_element(category_legend, 'input')).attrs.get('value')
+        for category_legend in categories_legend
+    }
+    print(category_name_to_linear_gradient_id)
+
+    filtered_categories = filter_by_dict_value(categories_dict, categories_name)
+    print('[DEBUG] filtered categories', filtered_categories)
+    random_filtered_category = random.choice(filtered_categories)
+    print('[DEBUG] random_filtered_category', random_filtered_category)
+    desired_linear_gradient_id = category_name_to_linear_gradient_id[random_filtered_category]
+    print('[DEBUG] desired_linear_gradient_id', desired_linear_gradient_id)
+
+    # logic
+    for category_checkbox in categories_checkbox:
+        await category_checkbox.mouse_click()
+    
+    desired_checkbox = await check_for_element(page, f'.categories_table > div[id*="{desired_linear_gradient_id}"]')
+    if not desired_checkbox: return False
+    await desired_checkbox.mouse_click()
+    time.sleep(1)
+
+    available_polygons = await check_for_elements(page, f'polygon[fill*="{desired_linear_gradient_id}"]')
+    print('available polygons count', len(available_polygons))
+    if not len(available_polygons): return
+    random_available_polygon = random.choice(available_polygons)
+    await random_available_polygon.mouse_click()
+    time_limit = 10
+    while await custom_wait(
+        page, '.loading[style="display: block;"]',
+        timeout=1) and time_limit > 0: time_limit-=1
+    # await page.get(seats2)
+    time.sleep(2)
+    available_circles = await check_for_elements(page, f'circle[fill="{category_name_to_color_hex[random_filtered_category]}"]')
+    print(len(available_circles), 'available_circles')
+    
 
 async def finalize_booking(page, select_el):
     """
@@ -835,14 +909,26 @@ async def main(
 
             # Step: get category dictionary for that match
             categories = await get_categories_for_match(data, selected_match_key)
+            print(categories, 'categories')
             if categories is None:
                 print(f"[ERROR] Could not find categories for match {selected_match_key}")
                 time.sleep(random.randint(reload_time[0], reload_time[1]))
                 return
 
+
+            # Step: define page type
+            page_type = await define_page_type(page)
+        
+            if not page_type:
+                print("[DEBUG] Event form not found – retrying")
+                continue
+
             # Step: find and select a category/quantity
-            select_el = await find_and_select_category(page, categories, reload_time)
-            print(select_el, 'select_el')
+            select_el = None
+            if page_type == 'event_form':
+                select_el = await find_and_select_category(page, categories, reload_time)
+            elif page_type == 'resale_form':
+                select_el = await find_and_select_category_resale(page, categories, reload_time)
             if select_el:
                 # Step: finalize booking
                 await finalize_booking(page, select_el)
