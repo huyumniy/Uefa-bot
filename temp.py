@@ -13,6 +13,7 @@ from utils.sheetsApi import GoogleSheetClient
 from utils.helpers import filter_by_dict_value
 from asyncio import iscoroutine, iscoroutinefunction
 from utils.helpers import extract_domain
+from filtration import get_nearby_chains, get_random_chain_slice
 import logging
 import json
 import asyncio
@@ -315,6 +316,7 @@ async def find_and_select_category_resale(page, categories_dict, reload_time):
     print('[DEBUG] filtered categories', filtered_categories)
     random_filtered_category = random.choice(filtered_categories)
     print('[DEBUG] random_filtered_category', random_filtered_category)
+    await custom_wait(page, f'polygon', timeout=5)
 
     for category_checkbox in categories_checkbox:
         await category_checkbox.click()
@@ -338,7 +340,19 @@ async def find_and_select_category_resale(page, categories_dict, reload_time):
     time.sleep(2)
     available_circles = await check_for_elements(page, f'circle[fill="{category_name_to_color_hex[random_filtered_category]}"]')
     print(len(available_circles), 'available_circles')
-    
+    circles_data = \
+    [   
+        {
+         "x": int(available_circle.attrs.get("cx").split('.')[0]),
+         "y": int(available_circle.get("cy").split('.')[0])
+        } for available_circle in available_circles
+    ]
+    print(circles_data, 'circles_data')
+    desired_amount_by_category = int(categories_dict[random_filtered_category])
+    chains = get_nearby_chains(circles_data, desired_amount_by_category)
+    print(chains, 'chains')
+    print(get_random_chain_slice(chains, desired_amount_by_category))
+
 
 async def main(
 ):

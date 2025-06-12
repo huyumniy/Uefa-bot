@@ -1,66 +1,108 @@
-from typing import List
+from typing import List, Dict
+from collections import deque
+import random
 
-def filter_seats(array: List[str], quantity: int) -> List[List[str]]:
+Point = Dict[str, float]
+
+def get_random_chain_slice(chains: List[List[Point]], quantity: int) -> List[Point]:
     """
-    Finds non-overlapping sequences where each sequence is a maximal chain of elements
-    (allowing extension both backward and forward) such that each consecutive pair differs
-    by exactly 1 or 2 in a single digit position, and only chains with length >= quantity
-    are returned.
-
-    Parameters:
-    - array: List of digit-strings (equal length).
-    - quantity: Minimum length for a valid chain.
-
-    Returns:
-    - List of non-overlapping chains (each a list of strings) of length >= quantity.
+    Randomly pick one chain from the list and return a random slice of 'quantity' points.
+    If the selected chain has fewer points than 'quantity', return the full chain.
     """
-    results = []
-    used = [False] * len(array)
+    if not chains:
+        return []
 
-    def is_near(a: str, b: str) -> bool:
-        # True if exactly one digit differs and its abs diff is 1 or 2
-        diffs = [abs(int(x) - int(y)) for x, y in zip(a, b)]
-        non_zero = [d for d in diffs if d > 0]
-        return len(non_zero) == 1 and non_zero[0] in (1, 2)
+    chain = random.choice(chains)
+    if len(chain) <= quantity:
+        return chain
 
-    n = len(array)
+    start_index = random.randint(0, len(chain) - quantity)
+    return chain[start_index:start_index + quantity]
+
+
+def build_proximity_graph(
+    points: List[Point],
+    max_dx: float = 40.0,
+    max_dy: float = 25.0
+) -> List[List[int]]:
+    """
+    Return an adjacency list for points: graph[i] is a list of indices j
+    such that points[i] is within the given dx/dy of points[j].
+    """
+    n = len(points)
+    graph = [[] for _ in range(n)]
+    
     for i in range(n):
-        if used[i]:
+        for j in range(i+1, n):
+            dx = abs(points[i]['x'] - points[j]['x'])
+            dy = abs(points[i]['y'] - points[j]['y'])
+            if dx <= max_dx and dy <= max_dy:
+                graph[i].append(j)
+                graph[j].append(i)
+    return graph
+
+
+def connected_components(graph: List[List[int]]) -> List[List[int]]:
+    """
+    Return a list of components, each as the list of node-indices in that component.
+    """
+    seen = set()
+    comps = []
+    for start in range(len(graph)):
+        if start in seen:
             continue
-        # start a new chain with i
-        seq = [i]
-        # extend backward
-        prev = i
-        for k in range(i - 1, -1, -1):
-            if used[k]:
-                continue
-            if is_near(array[k], array[prev]):
-                seq.insert(0, k)
-                prev = k
-        # extend forward
-        last = i
-        for j in range(i + 1, n):
-            if used[j]:
-                continue
-            if is_near(array[last], array[j]):
-                seq.append(j)
-                last = j
-        # record and mark if meets quantity
-        if len(seq) >= quantity:
-            # sort indices to maintain original order
-            seq_sorted = sorted(seq)
-            results.append([array[idx] for idx in seq_sorted])
-            for idx in seq_sorted:
-                used[idx] = True
-    return results
+        # BFS/DFS from start
+        queue = deque([start])
+        comp = []
+        seen.add(start)
+        while queue:
+            u = queue.popleft()
+            comp.append(u)
+            for v in graph[u]:
+                if v not in seen:
+                    seen.add(v)
+                    queue.append(v)
+        comps.append(comp)
+    return comps
+
+
+def get_nearby_chains(
+    points: List[Point],
+    quantity: int,
+    max_dx: float = 40.0,
+    max_dy: float = 25.0
+) -> List[List[Point]]:
+    """
+    1. Build the proximity graph on `points`.
+    2. Extract all connected components.
+    3. Keep only those of size >= quantity.
+    4. Return them as lists of point-dicts, each sorted by descending y.
+    """
+    if quantity < 1:
+        raise ValueError("quantity must be at least 1")
+    
+    graph = build_proximity_graph(points, max_dx, max_dy)
+    comps = connected_components(graph)
+    
+    # Filter + convert index-lists to actual point-lists
+    valid_chains = []
+    for comp in comps:
+        if len(comp) >= quantity:
+            chain = [points[i] for i in comp]
+            # sort chain however you like; we'll do descending Y
+            chain.sort(key=lambda p: -p['y'])
+            valid_chains.append(chain)
+    
+    return valid_chains
 
 
 if __name__ == "__main__":
-    # Example usage
-    data1 = ["121413","121414","1120","121412","121446","121447","121301","121305","121309"]
-    print(filter_seats(data1, 2))
-    # -> [["121412","121413","121414"],["121446","121447"]]
-
-    data2 = ["1743","1745","1746","1855","1856","1859"]
-    print(filter_seats(data2, 2))
-    # -> [["1743","1745","1746"],["1855","1856"]]
+    arr2 = [{'x': 310, 'y': 143}, {'x': 273, 'y': 75}, {'x': 237, 'y': 369}, {'x': 455, 'y': 301}, {'x': 310, 'y': 30}, {'x': 92, 'y': 324}, {'x': 201, 'y': 30}, {'x': 310, 'y': 188}, {'x': 201, 'y': 52}, {'x': 310, 'y': 211}, {'x': 201, 'y': 75}, {'x': 165, 'y': 120}, {'x': 310, 'y': 165}, {'x': 382, 'y': 324}, {'x': 273, 'y': 188}, {'x': 382, 'y': 165}, {'x': 310, 'y': 120}, {'x': 165, 'y': 165}, {'x': 201, 'y': 188}, {'x': 273, 'y': 30}, {'x': 237, 'y': 75}, {'x': 201, 'y': 279}, {'x': 237, 'y': 324}, {'x': 201, 'y': 369}, {'x': 455, 'y': 143}, {'x': 237, 'y': 301}, {'x': 165, 'y': 75}, {'x': 92, 'y': 279}, {'x': 273, 'y': 369}, {'x': 237, 'y': 256}, {'x': 128, 'y': 188}, {'x': 165, 'y': 256}, {'x': 382, 'y': 301}, {'x': 237, 'y': 279}, {'x': 310, 'y': 256}, {'x': 310, 'y': 347}, {'x': 310, 'y': 75}, {'x': 310, 'y': 234}, {'x': 455, 'y': 347}, {'x': 165, 'y': 211}, {'x': 201, 'y': 324}, {'x': 92, 'y': 120}, {'x': 201, 'y': 234}, {'x': 273, 'y': 120}, {'x': 128, 'y': 301}, {'x': 237, 'y': 234}, {'x': 237, 'y': 165}, {'x': 92, 'y': 301}, {'x': 310, 'y': 369}, {'x': 92, 'y': 234}, {'x': 128, 'y': 279}, {'x': 273, 'y': 165}, {'x': 201, 'y': 120}, {'x': 455, 'y': 279}, {'x': 273, 'y': 347}, {'x': 455, 'y': 165}, {'x': 237, 'y': 211}, {'x': 201, 'y': 301}, {'x': 92, 'y': 256}, {'x': 201, 'y': 211}, {'x': 455, 'y': 324}, {'x': 165, 'y': 347}, {'x': 455, 'y': 98}, {'x': 92, 'y': 188}, {'x': 273, 'y': 324}, {'x': 165, 'y': 30}, {'x': 310, 'y': 52}, {'x': 455, 'y': 211}, {'x': 165, 'y': 98}, {'x': 201, 'y': 347}, {'x': 201, 'y': 143}, {'x': 92, 'y': 165}, {'x': 237, 'y': 52}, {'x': 455, 'y': 256}, {'x': 128, 'y': 256}, {'x': 92, 'y': 211}, {'x': 455, 'y': 120}, {'x': 273, 'y': 301}, {'x': 128, 'y': 120}, {'x': 128, 'y': 52}, {'x': 310, 'y': 324}, {'x': 165, 'y': 301}, {'x': 165, 'y': 324}, {'x': 273, 'y': 234}, {'x': 237, 'y': 30}, {'x': 455, 'y': 75}, {'x': 273, 'y': 52}, {'x': 382, 'y': 234}, {'x': 273, 'y': 256}, {'x': 201, 'y': 256}, {'x': 455, 'y': 188}, {'x': 92, 'y': 143}, {'x': 382, 'y': 188}, {'x': 128, 'y': 75}, {'x': 165, 'y': 234}, {'x': 128, 'y': 234}, {'x': 310, 'y': 98}, {'x': 128, 'y': 165}, {'x': 165, 'y': 279}, {'x': 273, 'y': 211}, {'x': 128, 'y': 98}, {'x': 237, 'y': 143}, {'x': 201, 'y': 98}, {'x': 382, 'y': 256}, {'x': 382, 'y': 211}, {'x': 237, 'y': 188}, {'x': 310, 'y': 301}, {'x': 273, 'y': 98}, {'x': 310, 'y': 279}, {'x': 128, 'y': 30}, {'x': 128, 'y': 211}, {'x': 237, 'y': 347}, {'x': 165, 'y': 52}, {'x': 273, 'y': 279}, {'x': 382, 'y': 279}, {'x': 165, 'y': 188}, {'x': 201, 'y': 165}, {'x': 382, 'y': 347}, {'x': 273, 'y': 143}, {'x': 165, 'y': 143}, {'x': 455, 'y': 234}, {'x': 128, 'y': 324}, {'x': 128, 'y': 143}]
+    arr3 = [{'x': 237, 'y': 211}, {'x': 310, 'y': 211}, {'x': 382, 'y': 256}, {'x': 128, 'y': 279}, {'x': 310, 'y': 29}, {'x': 128, 'y': 188}, {'x': 201, 'y': 29}, {'x': 128, 'y': 256}, {'x': 165, 'y': 256}, {'x': 165, 'y': 301}, {'x': 237, 'y': 166}, {'x': 201, 'y': 369}, {'x': 273, 'y': 188}, {'x': 237, 'y': 256}, {'x': 455, 'y': 143}, {'x': 237, 'y': 392}, {'x': 273, 'y': 301}, {'x': 273, 'y': 211}, {'x': 382, 'y': 53}, {'x': 310, 'y': 301}, {'x': 310, 'y': 324}, {'x': 273, 'y': 120}, {'x': 237, 'y': 98}, {'x': 273, 'y': 279}, {'x': 92, 'y': 324}, {'x': 455, 'y': 53}, {'x': 455, 'y': 29}, {'x': 455, 'y': 7}, {'x': 237, 'y': 369}, {'x': 382, 'y': 29}, {'x': 310, 'y': 346}, {'x': 201, 'y': 53}, {'x': 273, 'y': 166}, {'x': 382, 'y': 75}, {'x': 346, 'y': 392}, {'x': 237, 'y': 53}, {'x': 128, 'y': 233}, {'x': 165, 'y': 369}, {'x': 201, 'y': 392}, {'x': 128, 'y': 301}, {'x': 273, 'y': 7}, {'x': 346, 'y': 369}, {'x': 128, 'y': 324}, {'x': 273, 'y': 369}, {'x': 165, 'y': 233}, {'x': 237, 'y': 324}, {'x': 237, 'y': 143}, {'x': 273, 'y': 143}, {'x': 237, 'y': 75}, {'x': 237, 'y': 346}, {'x': 165, 'y': 324}, {'x': 165, 'y': 211}, {'x': 237, 'y': 188}, {'x': 165, 'y': 346}, {'x': 165, 'y': 392}, {'x': 237, 'y': 279}, {'x': 273, 'y': 346}, {'x': 310, 'y': 75}, {'x': 310, 'y': 98}, {'x': 273, 'y': 392}, {'x': 273, 'y': 256}, {'x': 128, 'y': 211}, {'x': 310, 'y': 369}, {'x': 201, 'y': 346}, {'x': 92, 'y': 369}, {'x': 92, 'y': 392}, {'x': 165, 'y': 7}, {'x': 92, 'y': 256}, {'x': 237, 'y': 233}, {'x': 273, 'y': 29}, {'x': 237, 'y': 120}, {'x': 273, 'y': 324}, {'x': 128, 'y': 369}, {'x': 92, 'y': 346}, {'x': 310, 'y': 256}, {'x': 201, 'y': 7}, {'x': 455, 'y': 324}, {'x': 382, 'y': 233}, {'x': 92, 'y': 233}, {'x': 165, 'y': 279}, {'x': 310, 'y': 188}, {'x': 92, 'y': 301}, {'x': 128, 'y': 392}, {'x': 310, 'y': 7}, {'x': 455, 'y': 392}, {'x': 310, 'y': 53}, {'x': 310, 'y': 233}, {'x': 310, 'y': 143}, {'x': 310, 'y': 120}, {'x': 310, 'y': 279}, {'x': 165, 'y': 188}, {'x': 310, 'y': 392}, {'x': 128, 'y': 346}, {'x': 237, 'y': 301}, {'x': 310, 'y': 166}, {'x': 92, 'y': 279}, {'x': 273, 'y': 233}, {'x': 382, 'y': 143}, {'x': 382, 'y': 120}, {'x': 382, 'y': 166}, {'x': 455, 'y': 166}, {'x': 455, 'y': 346}, {'x': 455, 'y': 369}, {'x': 455, 'y': 75}, {'x': 455, 'y': 279}, {'x': 455, 'y': 98}, {'x': 455, 'y': 120}, {'x': 455, 'y': 301}]
+    chains = get_nearby_chains(arr3, quantity=4)
+    random_slice = get_random_chain_slice(chains, 4)
+    print(random_slice)
+    # for i, chain in enumerate(chains, 1):
+    #     print(f"Chain {i} (size {len(chain)}):")
+    #     for pt in chain:
+    #         print("  ", pt)

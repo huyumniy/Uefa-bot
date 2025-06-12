@@ -11,6 +11,7 @@ import time
 import sys, os
 from utils.sheetsApi import GoogleSheetClient
 from utils.helpers import filter_by_dict_value
+from filtration import get_nearby_chains, get_random_chain_slice
 from asyncio import iscoroutine, iscoroutinefunction
 from utils.helpers import extract_domain
 import logging
@@ -733,65 +734,98 @@ async def find_and_select_category_resale(page, categories_dict, reload_time):
     print('find and select category resale')
     global data, accounts, seat_select, seats, seats2, \
     seat_selected, seat_selected_2, stadium, stadium_category
+    for _ in range(0, 10):
+        is_empty = all(value == '' for value in categories_dict.values())
+        if is_empty: return False
 
-    is_empty = all(value == '' for value in categories_dict.values())
-    if is_empty: return False
+        categories_legend = await check_for_elements(page, '.seat-info-category-legend')
+        categories_checkbox = await check_for_elements(page, 'input[type="checkbox"]')
 
-    categories_legend = await check_for_elements(page, '.seat-info-category-legend')
-    categories_checkbox = await check_for_elements(page, 'input[type="checkbox"]')
+        categories_name = [(await check_for_element(category_legend, 'p > label > span:nth-child(2)')).text for category_legend in categories_legend]
 
-    categories_name = [(await check_for_element(category_legend, 'p > label > span:nth-child(2)')).text for category_legend in categories_legend]
+        # mapping
+        category_name_to_color_hex = {
+            (await check_for_element(category_legend, 'p > label > span:nth-child(2)')).text:
+            (await check_for_element(category_legend, 'p > label > span:nth-child(1)')).attrs.get('style').split(':')[1]
+            for category_legend in categories_legend
+        }
+        category_name_to_linear_gradient_id = {
+            (await check_for_element(category_legend, 'p > label > span:nth-child(2)')).text:
+            (await check_for_element(category_legend, 'input')).attrs.get('value')
+            for category_legend in categories_legend
+        }
+        print(category_name_to_linear_gradient_id)
 
-    # mapping
-    category_name_to_color_hex = {
-        (await check_for_element(category_legend, 'p > label > span:nth-child(2)')).text:
-        (await check_for_element(category_legend, 'p > label > span:nth-child(1)')).attrs.get('style').split(':')[1]
-        for category_legend in categories_legend
-    }
-    category_name_to_linear_gradient_id = {
-        (await check_for_element(category_legend, 'p > label > span:nth-child(2)')).text:
-        (await check_for_element(category_legend, 'input')).attrs.get('value')
-        for category_legend in categories_legend
-    }
-    print(category_name_to_linear_gradient_id)
+        filtered_categories = filter_by_dict_value(categories_dict, categories_name)
+        print('[DEBUG] filtered categories', filtered_categories)
+        random_filtered_category = random.choice(filtered_categories)
+        print('[DEBUG] random_filtered_category', random_filtered_category)
+        desired_linear_gradient_id = category_name_to_linear_gradient_id[random_filtered_category]
+        print('[DEBUG] desired_linear_gradient_id', desired_linear_gradient_id)
 
-    filtered_categories = filter_by_dict_value(categories_dict, categories_name)
-    print('[DEBUG] filtered categories', filtered_categories)
-    random_filtered_category = random.choice(filtered_categories)
-    print('[DEBUG] random_filtered_category', random_filtered_category)
-    desired_linear_gradient_id = category_name_to_linear_gradient_id[random_filtered_category]
-    print('[DEBUG] desired_linear_gradient_id', desired_linear_gradient_id)
+        # logic
+        for category_checkbox in categories_checkbox:
+            await category_checkbox.mouse_click()
+        
+        desired_checkbox = await check_for_element(page, f'.categories_table > div[id*="{desired_linear_gradient_id}"]')
+        if not desired_checkbox: return False
+        await desired_checkbox.mouse_click()
+        time.sleep(1)
 
-    # logic
-    for category_checkbox in categories_checkbox:
-        await category_checkbox.mouse_click()
-    
-    desired_checkbox = await check_for_element(page, f'.categories_table > div[id*="{desired_linear_gradient_id}"]')
-    if not desired_checkbox: return False
-    await desired_checkbox.mouse_click()
-    time.sleep(1)
+        available_polygons = await check_for_elements(page, f'polygon[fill*="{desired_linear_gradient_id}"]')
+        print('available polygons count', len(available_polygons))
+        if not len(available_polygons): return False
+        random_available_polygon = random.choice(available_polygons)
+        await random_available_polygon.mouse_click()
+        time_limit = 10
+        while await custom_wait(
+            page, '.loading[style="display: block;"]',
+            timeout=1) and time_limit > 0: time_limit-=1
+        
+        time.sleep(2)
+        available_circles = await check_for_elements(page, f'circle[fill="{category_name_to_color_hex[random_filtered_category]}"]')
+        print(len(available_circles), 'available_circles')
+        circles_data = \
+        [   
+            {
+            "x": int(available_circle.attrs.get("cx").split('.')[0]),
+            "y": int(available_circle.get("cy").split('.')[0])
+            } for available_circle in available_circles
+        ]
+        print(circles_data, 'circles_data')
+        desired_amount_by_category = int(categories_dict[random_filtered_category])
+        chains = get_nearby_chains(circles_data, desired_amount_by_category)
+        print(chains, 'chains')
+        desired_slice = get_random_chain_slice(chains, desired_amount_by_category)
+        print(desired_slice, 'desired slice')
+        if not desired_slice: 
+            for _ in range(0, 4):
+                zoom_out = await check_for_element(page, '#zoom-out')
+                await zoom_out.mouse_click()
+                time.sleep(1)
+            continue
+        for point in desired_slice:
+            desired_circle = await check_for_element(page, f'circle[cx*="{point["x"]}"][cy*="{point["y"]}"]')
+            await desired_circle.mouse_click()
+            time.sleep(1)
+            book_seat = await check_for_element(page, '#add-selected-seat-to-cart')
+            await book_seat.mouse_click()
+        selection = await check_for_element(page, '#num-tickets')
+        print(selection.text)
+        if int(selection.text.split('(')[1].split(')')[0])\
+        >= desired_amount_by_category:
+            return True
+        continue
+    return False
 
-    available_polygons = await check_for_elements(page, f'polygon[fill*="{desired_linear_gradient_id}"]')
-    print('available polygons count', len(available_polygons))
-    if not len(available_polygons): return
-    random_available_polygon = random.choice(available_polygons)
-    await random_available_polygon.mouse_click()
-    time_limit = 10
-    while await custom_wait(
-        page, '.loading[style="display: block;"]',
-        timeout=1) and time_limit > 0: time_limit-=1
-    # await page.get(seats2)
-    time.sleep(2)
-    available_circles = await check_for_elements(page, f'circle[fill="{category_name_to_color_hex[random_filtered_category]}"]')
-    print(len(available_circles), 'available_circles')
-    
-
-async def finalize_booking(page, select_el):
+async def finalize_booking(page, select_el=None):
     """
     After a category/quantity is selected, click “Book” and wait for success. Play sound and extract info.
     """
     print("[DEBUG] Clicking Book button…")
     book_btn = await page.query_selector('#book')
+    if not book_btn:
+        book_btn = await page.query_selector('#add-to-cart')
     await book_btn.scroll_into_view()
     await book_btn.mouse_click()
 
@@ -843,7 +877,8 @@ async def finalize_booking(page, select_el):
         await page.back()
 
         # Reset quantity back to zero if needed
-        zero_option = await select_el.query_selector('option[value="0"]')
+        
+        zero_option = await check_for_element(select_el, 'option[value="0"]')
         if zero_option:
             await select_el.select_option()
             print("[DEBUG] Reset quantity to 0")
@@ -876,6 +911,7 @@ async def main(
     print(' actual link')
     driver = await create_driver(open_url=adspower_link, proxy_list=proxy_list)
     page = driver.main_tab
+    input('continue?')
     print(f"[DEBUG] Navigating to setup page for NopeCha…")
     await page.get('https://nopecha.com/setup#sub_1RWdSzCRwBwvt6ptKAX3W64k|keys=|enabled=true|disabled_hosts=|hcaptcha_auto_open=true|hcaptcha_auto_solve=true|hcaptcha_solve_delay=true|hcaptcha_solve_delay_time=3000|recaptcha_auto_open=true|recaptcha_auto_solve=true|recaptcha_solve_delay=true|recaptcha_solve_delay_time=1000|funcaptcha_auto_open=true|funcaptcha_auto_solve=true|funcaptcha_solve_delay=true|funcaptcha_solve_delay_time=0|awscaptcha_auto_open=true|awscaptcha_auto_solve=true|awscaptcha_solve_delay=true|awscaptcha_solve_delay_time=0|turnstile_auto_solve=true|turnstile_solve_delay=true|turnstile_solve_delay_time=1000|perimeterx_auto_solve=false|perimeterx_solve_delay=true|perimeterx_solve_delay_time=1000|textcaptcha_auto_solve=true|textcaptcha_solve_delay=true|textcaptcha_solve_delay_time=0|textcaptcha_image_selector=#img_captcha|textcaptcha_input_selector=#secret|recaptcha_solve_method=Image')
     browser_part = f"Browser: {adspower_id if adspower_id else browser_id}"
@@ -900,7 +936,7 @@ async def main(
             selected_match_key = await select_random_match(page, data, reload_time)
             if not selected_match_key:
                 continue
-            #TODO: implement slack push if there's a desired match and active checkbox from gui
+            
             if slack_push_desired_match:
                 user_part    = f"User: {os.getlogin()}."
                 text = f"З'явився матч: {selected_match_key}, {actual_link}"

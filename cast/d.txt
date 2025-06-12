@@ -1,4 +1,23 @@
+x 38px
+
 210.1736581508685
 165.09536399451918
 120.01706983816985
 73.95881276537875
+
+41.749999999900865
+78.00862790826886
+
+
+ 
+y 24px
+
+145.04768199722548
+122.50853491905082
+
+		 (url)		(url)	   (session storage)
+UEFA_TWE25RSS_<productId>_<performanceId>_<seatMapSelection>_<areaId>_<blockId>_<tariffId>_<seatCategoryId>_<amount>
+
+UEFA_TWE25RSS_10229214363736_10229345301754_10229345302651_10229346329529_10229346329655_10229214206783_10229346339631_25000
+
+https://womenseuro-resale.tickets.uefa.com/secured/selection/resale/item?performanceId=10229345301754&productId=10229214363736&lang=en
