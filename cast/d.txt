@@ -15,9 +15,111 @@ y 24px
 145.04768199722548
 122.50853491905082
 
+
+seatInfo.json payload
+
+productId		10229214363736
+perfId			10229345301754
+seatId			10229346335642
+advantageId
+ppid
+reservationIdx
+crossSellId
+_				1749816796256 (?)
+
 		 (url)		(url)	   (session storage)
 UEFA_TWE25RSS_<productId>_<performanceId>_<seatMapSelection>_<areaId>_<blockId>_<tariffId>_<seatCategoryId>_<amount>
 
 UEFA_TWE25RSS_10229214363736_10229345301754_10229345302651_10229346329529_10229346329655_10229214206783_10229346339631_25000
 
 https://womenseuro-resale.tickets.uefa.com/secured/selection/resale/item?performanceId=10229345301754&productId=10229214363736&lang=en
+
+
+https://womenseuro-resale.tickets.uefa.com/ajax/resale/seatInfo?productId=10229214363736&perfId=10229345301754&seatId=10229346335187&advantageId=&ppid=&reservationIdx=&crossSellId=
+
+
+"properties": {
+	"id": 10229346335297,
+	"blockId": 10229346329656,
+	"areaId": 10229346329529,
+	"color": "143cdb",
+	"row": "7",
+	"number": "179",
+	"noReselect": false,
+	"seatCategoryId": 10229346339631,
+	"scenePhotoLink": null,
+	"scenePanoLink": null,
+	"advantageId": null,
+	"areaName": "SUD",
+	"seatCatRank": 6,
+	"distributionTicketResult": null,
+	"seatCategory": "Category 2",
+	"tariffId": 10229214206783,
+	"tariff": "Purchase",
+	"amount": 25000,
+	"contingentId": 389874967
+}
+
+
+submit payload
+
+performanceId
+10229345301754
+
+
+_csrf
+73a36472-cbdc-411d-885e-da1604da09c8
+
+
+resaleItemData[0].audienceSubCategoryId
+10229214206783
+
+
+resaleItemData[0].seatCategoryId
+10229346339631
+
+
+resaleItemData[0].quantity
+1
+
+
+resaleItemData[0].unitAmount
+25000
+
+
+resaleItemData[0].key
+UEFA_TWE25RSS_10229214363736_10229345301754_10229345302651_10229346329529_10229346329656_10229214206783_10229346339631_25000
+
+
+resaleItemData[0].priceLevelId
+
+
+resaleItemData[0].movementIds[0]
+10229399982892
+
+
+resaleItemData[1].audienceSubCategoryId
+10229214206783
+
+
+resaleItemData[1].seatCategoryId
+10229346339631
+
+
+resaleItemData[1].quantity
+1
+
+
+resaleItemData[1].unitAmount
+25000
+
+
+resaleItemData[1].key
+UEFA_TWE25RSS_10229214363736_10229345301754_10229345302651_10229346329529_10229346329656_10229214206783_10229346339631_25000
+
+
+resaleItemData[1].priceLevelId
+
+
+resaleItemData[1].movementIds[0]
+10229399982893

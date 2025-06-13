@@ -11,7 +11,7 @@ import time
 import sys, os
 from utils.sheetsApi import GoogleSheetClient
 from utils.helpers import filter_by_dict_value
-from filtration import get_nearby_chains, get_random_chain_slice
+from filtration import get_nearby_chains, get_random_chain_slice, find_nearby_chains
 from asyncio import iscoroutine, iscoroutinefunction
 from utils.helpers import extract_domain
 import logging
@@ -729,11 +729,38 @@ async def find_and_select_category(page, categories_dict, reload_time):
             continue
 
 
+async def find_and_select_category_resale2(page, categories_dict, reload_time):
+    current_location = await get_location(page)
+    print(current_location, 'current_location')
+    domain = 'https://' + current_location.split('https://')[1].split('/')[0]
+    performance_id = current_location.split('performanceId=')[1].split('&')[0]
+    product_id = current_location.split('productId=')[1].split('&')[0]
+    desired_location = f'{domain}/ajax/resale/freeSeats?productId={product_id}&performanceId={performance_id}'
+    print(desired_location, 'desired_location')
+    categories_legend = await check_for_elements(page, '.seat-info-category-legend')
+
+    categories_name = [(await check_for_element(category_legend, 'p > label > span:nth-child(2)')).text for category_legend in categories_legend]
+    filtered_categories = filter_by_dict_value(categories_dict, categories_name)
+    random_filtered_category = random.choice(filtered_categories)
+    seats_response = await request_seats(page, desired_location)
+    print(int(categories_dict[random_filtered_category]), random_filtered_category)
+    chains = find_nearby_chains(seats_response["features"], int(categories_dict[random_filtered_category]), random_filtered_category)
+    print(len(chains))
+    if not chains: return False
+    chain = random.choice(chains)
+    print('chosen chain:', chain)
+    for seat in chain:
+        seat_info_url = f'https://womenseuro-resale.tickets.uefa.com/ajax/resale/seatInfo?productId={product_id}&perfId={performance_id}&seatId={seat["id"]}&advantageId=&ppid=&reservationIdx=&crossSellId='
+        seat_info_response = send_request(seat_info_url)
+        
+        area_id = seat['properties']['areaId']
+        block_id = seat['properties']['blockId']
+        tariff_id = seat['properties']['tariffId']
+        seat_category_id = seat['properties']['seatCategoryId']
+        amount = seat['properties']['amount']
 
 async def find_and_select_category_resale(page, categories_dict, reload_time):
     print('find and select category resale')
-    global data, accounts, seat_select, seats, seats2, \
-    seat_selected, seat_selected_2, stadium, stadium_category
     for _ in range(0, 10):
         is_empty = all(value == '' for value in categories_dict.values())
         if is_empty: return False
@@ -964,7 +991,7 @@ async def main(
             if page_type == 'event_form':
                 select_el = await find_and_select_category(page, categories, reload_time)
             elif page_type == 'resale_form':
-                select_el = await find_and_select_category_resale(page, categories, reload_time)
+                select_el = await find_and_select_category_resale2(page, categories, reload_time)
             if select_el:
                 # Step: finalize booking
                 await finalize_booking(page, select_el)
@@ -1065,6 +1092,45 @@ def is_port_open(host, port):
     return False
   finally:
     sock.close()
+
+
+async def get_location(driver):
+    script = f"""
+    (function() {{
+        return window.location.href
+    }}())
+    """
+    # await the promise, return the JS value directly
+    result = await driver.evaluate(
+        script,
+        await_promise=True,
+        return_by_value=True
+    )
+    return result
+
+
+
+async def request_seats(driver, url):
+    script = f"""
+    (async function() {{
+      try {{
+        const res = await fetch("{url}");
+        if (!res.ok) return null;
+        const data = await res.json();
+        return JSON.stringify(data);
+      }} catch (e) {{
+        return null;
+      }}
+    }})()
+    """
+    json_str = await driver.evaluate(
+        script,
+        await_promise=True,
+        return_by_value=True
+    )
+    if json_str is None:
+        return None
+    return json.loads(json_str)
 
 
 if __name__ == "__main__":
