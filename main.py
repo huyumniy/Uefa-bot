@@ -1,5 +1,6 @@
 import os
 import json
+from pprint import pprint
 import requests
 import nodriver as uc
 import random
@@ -178,7 +179,7 @@ def post_request(data):
 
     # Send the POST request
     try:
-        response = requests.post(f"http://localhost:8001/book", data=json_data, headers=headers)
+        response = requests.post(f"http://localhost:8010/book", data=json_data, headers=headers)
         print(response)
     except Exception as e:
         print(e)
@@ -730,34 +731,89 @@ async def find_and_select_category(page, categories_dict, reload_time):
 
 
 async def find_and_select_category_resale2(page, categories_dict, reload_time):
-    current_location = await get_location(page)
-    print(current_location, 'current_location')
-    domain = 'https://' + current_location.split('https://')[1].split('/')[0]
-    performance_id = current_location.split('performanceId=')[1].split('&')[0]
-    product_id = current_location.split('productId=')[1].split('&')[0]
-    desired_location = f'{domain}/ajax/resale/freeSeats?productId={product_id}&performanceId={performance_id}'
-    print(desired_location, 'desired_location')
-    categories_legend = await check_for_elements(page, '.seat-info-category-legend')
+    try:
+        for attempt in range(0, 10):
+            if await check_for_element(page, '#captcha_dialog'): return False
+            print(f'[DEBUG]: {attempt}/10 attempt to find tickets')
+            current_location = await get_location(page)
+            if 'performanceId' not in current_location and 'productId' not in current_location:
+                print('[DEBUG]: returning to matches page...')
+                return False
+            domain = 'https://' + current_location.split('https://')[1].split('/')[0]
+            performance_id = current_location.split('performanceId=')[1].split('&')[0]
+            product_id = current_location.split('productId=')[1].split('&')[0]
+            desired_location = f'{domain}/ajax/resale/freeSeats?productId={product_id}&performanceId={performance_id}'
+            print(desired_location, 'desired_location')
+            categories_legend = await check_for_elements(page, '.seat-info-category-legend')
 
-    categories_name = [(await check_for_element(category_legend, 'p > label > span:nth-child(2)')).text for category_legend in categories_legend]
-    filtered_categories = filter_by_dict_value(categories_dict, categories_name)
-    random_filtered_category = random.choice(filtered_categories)
-    seats_response = await request_seats(page, desired_location)
-    print(int(categories_dict[random_filtered_category]), random_filtered_category)
-    chains = find_nearby_chains(seats_response["features"], int(categories_dict[random_filtered_category]), random_filtered_category)
-    print(len(chains))
-    if not chains: return False
-    chain = random.choice(chains)
-    print('chosen chain:', chain)
-    for seat in chain:
-        seat_info_url = f'https://womenseuro-resale.tickets.uefa.com/ajax/resale/seatInfo?productId={product_id}&perfId={performance_id}&seatId={seat["id"]}&advantageId=&ppid=&reservationIdx=&crossSellId='
-        seat_info_response = send_request(seat_info_url)
-        
-        area_id = seat['properties']['areaId']
-        block_id = seat['properties']['blockId']
-        tariff_id = seat['properties']['tariffId']
-        seat_category_id = seat['properties']['seatCategoryId']
-        amount = seat['properties']['amount']
+            categories_name = [(await check_for_element(category_legend, 'p > label > span:nth-child(2)')).text for category_legend in categories_legend]
+            filtered_categories = filter_by_dict_value(categories_dict, categories_name)
+            random_filtered_category = random.choice(filtered_categories)
+            seats_response = await get_request(page, desired_location)
+            desired_category_quantity = int(categories_dict[random_filtered_category])
+            chains = find_nearby_chains(seats_response["features"], desired_category_quantity, random_filtered_category)
+            print('[DEBUG]:', len(chains), 'total found tickets')
+            if not chains: 
+                print('No nearby tickets found.')
+                time.sleep(random.randint(reload_time[0], reload_time[1]))
+                continue
+            chain = get_random_chain_slice(chains, desired_category_quantity)
+            # print('chosen chain:', chain)
+            no_seat = False
+            csrf_acquire_url = f'{domain}/ajax/selection/csrf/acquire'
+            csrf_token = await get_csrf_token(page, csrf_acquire_url)
+            if not csrf_token:
+                print(csrf_token)
+                print('[DEBUG]: no csrf token found ')
+                time.sleep(random.randint(reload_time[0], reload_time[1]))
+                continue
+            print('chain', chain)
+            payload = {"_csrf": csrf_token, "performanceId": performance_id}
+
+            for idx, seat in enumerate(chain):
+                seat_info_url = f'{domain}/ajax/resale/seatInfo?productId={product_id}&perfId={performance_id}&seatId={seat["id"]}&advantageId=&ppid=&reservationIdx=&crossSellId='
+                seat_info_response = await get_request(page, seat_info_url)
+                print('[DEBUG]: is seat info response', bool(seat_info_response))
+                if not seat_info_response: 
+                    no_seat = True
+                    break
+                elif seat_info_response['error']:
+                    print(f'[DEBUG]: seat_info_response returned: {seat_info_response["status"]} {seat_info_response["errorCode"]}')
+                    no_seat = True
+                    break
+                # resaleItemData[0].key
+                resale_key = seat_info_response['resaleInfo']['resaleKey']
+                print('[DEBUG]: resale_key', resale_key)
+                movement_ids = seat_info_response['resaleInfo']['resaleMovId']
+                print('[DEBUG]: movement_ids')
+                audience_sub_category_id = seat_info_response['resaleInfo']['audienceSubCategoryId']
+                print('[DEBUG]: audience_sub_category_id', audience_sub_category_id)
+                price_level_id = seat_info_response['prices'][0]['priceLevelId']
+                print('[DEBUG]: price_level_id', price_level_id)
+
+                seat_category_id = seat['properties']['seatCategoryId']
+                amount = seat['properties']['amount']
+
+                payload[f'resaleItemData[{idx}].audienceSubCategoryId'] = audience_sub_category_id
+                payload[f'resaleItemData[{idx}].seatCategoryId'] = seat_category_id
+                payload[f'resaleItemData[{idx}].quantity'] = 1
+                payload[f'resaleItemData[{idx}].unitAmount'] = amount
+                payload[f'resaleItemData[{idx}].key'] = resale_key
+                payload[f'resaleItemData[{idx}].priceLevelId'] = price_level_id
+                payload[f'resaleItemData[{idx}].movementIds[0]'] = movement_ids
+
+            pprint(payload)
+            print('no_seat', no_seat)
+            if no_seat:
+                print('Not enough seats found')
+                time.sleep(random.randint(reload_time[0], reload_time[1]))
+                continue
+            await submitPayload(page, '#ResaleItemFormModel', payload)
+            return True
+    except Exception as e:
+        print('function find_and_select_category_resale2. Error:', e)
+        return False
+
 
 async def find_and_select_category_resale(page, categories_dict, reload_time):
     print('find and select category resale')
@@ -850,11 +906,10 @@ async def finalize_booking(page, select_el=None):
     After a category/quantity is selected, click “Book” and wait for success. Play sound and extract info.
     """
     print("[DEBUG] Clicking Book button…")
-    book_btn = await page.query_selector('#book')
-    if not book_btn:
-        book_btn = await page.query_selector('#add-to-cart')
-    await book_btn.scroll_into_view()
-    await book_btn.mouse_click()
+    book_btn = await check_for_element(page, '#book')
+    if book_btn:
+        await book_btn.scroll_into_view()
+        await book_btn.mouse_click()
 
     # Check if a captcha dialog pops up again
     captcha_dialog = await custom_wait(page, '#captcha_dialog', timeout=5)
@@ -880,22 +935,20 @@ async def finalize_booking(page, select_el=None):
         total_price_el = await custom_wait(page, 'td.stx_tfooter.reservation_amount span.int_part', timeout=1)
         unit_price_el = await custom_wait(page, 'td.unit_price span.int_part', timeout=1)
         desc_el = await custom_wait(page, 'p.semantic-no-styling-no-display.description', timeout=1)
-
+        team_home = await check_for_element(page, '.teams > span:nth-child(1) > .name')
+        team_opposite = await check_for_element(page, '.teams > span:nth-child(3) > .name')
+        teams = ''
+        if team_home and team_opposite:
+            teams = team_home.text.strip() + ' vs ' + team_opposite.text.strip()
         match_number = match_num_el.text.strip() if match_num_el else ''
         match_amount = f"€ {total_price_el.text.strip()}" if total_price_el else ''
         match_unit_price = f"€ {unit_price_el.text.strip()}" if unit_price_el else ''
         description_text = desc_el.text.strip() if desc_el else ''
 
-        print(f"[INFO] Match: {match_number}, Total: {match_amount}, Unit: {match_unit_price}, Category: {description_text}")
+        post_data = {"data": f"[INFO] Номер матча: {match_number}\nКоманди: {teams}\nЗагальна ціна: {match_amount}\nЦіна за квиток: {match_unit_price}\n{description_text}"}
 
-        data_to_post = {
-            "match_number": match_number,
-            "total_price": match_amount,
-            "unit_price": match_unit_price,
-            "category": description_text
-        }
         try:
-            post_request(data_to_post)
+            post_request(post_data)
             print("[DEBUG] Sent post-request with booking details")
         except Exception as e:
             print(f"[WARN] post_request failed: {e}")
@@ -1108,9 +1161,28 @@ async def get_location(driver):
     )
     return result
 
+async def get_csrf_token(page, url):
+    script = f"""
+    (async function() {{
+      try {{
+        const res = await fetch("{url}");
+        if (!res.ok) return null;
+        const data = await res.text();
+        return data;
+      }} catch (e) {{
+        return null;
+      }}
+    }})()
+    """
+    text = await page.evaluate(
+        script,
+        await_promise=True,
+        return_by_value=True
+    )
+    return text
 
 
-async def request_seats(driver, url):
+async def get_request(page, url):
     script = f"""
     (async function() {{
       try {{
@@ -1123,7 +1195,7 @@ async def request_seats(driver, url):
       }}
     }})()
     """
-    json_str = await driver.evaluate(
+    json_str = await page.evaluate(
         script,
         await_promise=True,
         return_by_value=True
@@ -1131,6 +1203,35 @@ async def request_seats(driver, url):
     if json_str is None:
         return None
     return json.loads(json_str)
+
+
+async def submitPayload(page, selector: str, params: dict):
+    params_json = json.dumps(params)
+    script = f"""
+    (function submitCustomForm(selector, params) {{
+        const form = document.querySelector(selector);
+        if (!form) {{
+            console.error(`Form with selector "${{selector}}" not found.`);
+            return;
+        }}
+        form.innerHTML = "";
+        Object.entries(params).forEach(([key, value]) => {{
+            const div = document.createElement("div");
+            const input = document.createElement("input");
+            input.type = "hidden";
+            input.name = key;
+            input.value = value;
+            if (key === '_csrf') {{
+                div.appendChild(input)
+                form.appendChild(div)
+            }} else {{
+                form.appendChild(input);
+            }}
+        }});
+        form.submit();
+    }})("{selector}", {params_json});
+    """
+    await page.evaluate(script)
 
 
 if __name__ == "__main__":

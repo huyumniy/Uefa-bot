@@ -39,7 +39,7 @@ def send_to_group_channel(data):
         return False
     try:
         client.chat_postMessage(
-            channel="#ticketmaster_notifications_temp",
+            channel="#uefa-bot-notifications",
             text=data,
             parse="mrkdwn"
         )
