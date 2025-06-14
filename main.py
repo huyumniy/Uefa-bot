@@ -903,7 +903,7 @@ async def find_and_select_category_resale(page, categories_dict, reload_time):
         continue
     return False
 
-async def finalize_booking(page, select_el=None):
+async def finalize_booking(page, user_info, select_el=None):
     """
     After a category/quantity is selected, click “Book” and wait for success. Play sound and extract info.
     """
@@ -947,7 +947,7 @@ async def finalize_booking(page, select_el=None):
         match_unit_price = f"€ {unit_price_el.text.strip()}" if unit_price_el else ''
         description_text = desc_el.text.strip() if desc_el else ''
 
-        post_data = {"data": f"[INFO] Номер матча: {match_number}\nКоманди: {teams}\nЗагальна ціна: {match_amount}\nЦіна за квиток: {match_unit_price}\n{description_text}"}
+        post_data = {"data": f"{user_info}\nНомер матча: {match_number}\nКоманди: {teams}\nЗагальна ціна: {match_amount}\nЦіна за квиток: {match_unit_price}\n{description_text}"}
 
         try:
             post_request(post_data)
@@ -996,7 +996,8 @@ async def main(
     print(f"[DEBUG] Navigating to setup page for NopeCha…")
     await page.get('https://nopecha.com/setup#sub_1RWdSzCRwBwvt6ptKAX3W64k|keys=|enabled=true|disabled_hosts=|hcaptcha_auto_open=true|hcaptcha_auto_solve=true|hcaptcha_solve_delay=true|hcaptcha_solve_delay_time=3000|recaptcha_auto_open=true|recaptcha_auto_solve=true|recaptcha_solve_delay=true|recaptcha_solve_delay_time=1000|funcaptcha_auto_open=true|funcaptcha_auto_solve=true|funcaptcha_solve_delay=true|funcaptcha_solve_delay_time=0|awscaptcha_auto_open=true|awscaptcha_auto_solve=true|awscaptcha_solve_delay=true|awscaptcha_solve_delay_time=0|turnstile_auto_solve=true|turnstile_solve_delay=true|turnstile_solve_delay_time=1000|perimeterx_auto_solve=false|perimeterx_solve_delay=true|perimeterx_solve_delay_time=1000|textcaptcha_auto_solve=true|textcaptcha_solve_delay=true|textcaptcha_solve_delay_time=0|textcaptcha_image_selector=#img_captcha|textcaptcha_input_selector=#secret|recaptcha_solve_method=Image')
     browser_part = f"Browser: {adspower_id if adspower_id else browser_id}"
-
+    user_part    = f"User: {os.getlogin()}."
+    user_info = "\n".join([user_part + " " + browser_part])
     while True:
         try:
             await wait_for_initial_page(page, actual_link, browser_id=browser_part)
@@ -1019,7 +1020,6 @@ async def main(
                 continue
             
             if slack_push_desired_match:
-                user_part    = f"User: {os.getlogin()}."
                 text = f"З'явився матч: {selected_match_key}, {actual_link}"
                 message = "\n".join([user_part + " " + browser_part, text])
                 send_slack_message(message)
@@ -1048,7 +1048,7 @@ async def main(
                 select_el = await find_and_select_category_resale2(page, categories, reload_time)
             if select_el:
                 # Step: finalize booking
-                await finalize_booking(page, select_el)
+                await finalize_booking(page, user_info, select_el)
             else:
                 print("[WARN] No category was ever selected—exiting main loop")
                 time.sleep(random.randint(reload_time[0], reload_time[1]))
