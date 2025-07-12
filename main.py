@@ -487,7 +487,7 @@ async def wait_for_initial_page(page, actual_link, browser_id=None):
     while True:
         print("[DEBUG] Checking for main page load…")
         print('get location', await get_location(page))
-        if await get_location(page) == "https://uefa.com": await page.get(actual_link)
+        if await get_location(page) == "https://www.uefa.com/": await page.get(actual_link)
         elif "access-ticketshop.uefa.com" in await get_location(page): time.sleep(15)
         # First: check if login/captcha form is present
         if await custom_wait(page, '#root_content', timeout=5):
@@ -517,7 +517,7 @@ async def wait_for_initial_page(page, actual_link, browser_id=None):
     print("[DEBUG] Final navigation to initial link complete")
 
 
-async def click_buy_and_inner_buttons(page):
+async def click_buy_and_inner_buttons(page, actual_link):
     """
     On the main page, attempt to click the “Buy ticket” button and any nested action button.
     Return once the #performance_container appears.
@@ -525,6 +525,7 @@ async def click_buy_and_inner_buttons(page):
     print("[DEBUG] Attempting to click Buy buttons…")
     while True:
         await reject_cookies(page)
+        if await get_location(page, 'https://www.uefa.com/'): await page.get(actual_link)
         if await custom_wait(page, 'iframe[src^="https://geo.captcha-delivery.com"]', timeout=2):
             break
         try:
@@ -1033,7 +1034,7 @@ async def main(
             await wait_for_initial_page(page, actual_link, browser_id=browser_part)
 
             # Step: click buy buttons until performance container appears
-            await click_buy_and_inner_buttons(page)
+            await click_buy_and_inner_buttons(page, actual_link)
 
             await reject_cookies(page)
 
