@@ -486,6 +486,9 @@ async def wait_for_initial_page(page, actual_link, browser_id=None):
     # Loop until we find the “#isolated_header_iframe” marker
     while True:
         print("[DEBUG] Checking for main page load…")
+        print('get location', await get_location(page))
+        if await get_location(page) == "https://uefa.com": await page.get(actual_link)
+        elif "access-ticketshop.uefa.com" in await get_location(page): time.sleep(15)
         # First: check if login/captcha form is present
         if await custom_wait(page, '#root_content', timeout=5):
             await login_if_captcha(page)
@@ -551,6 +554,10 @@ async def click_buy_and_inner_buttons(page):
         if is_menu:
             print("[DEBUG] Performance container located – proceeding")
             break
+        is_match = await check_for_element(page, "#seat_map_group")
+        if is_match:
+            print('only one match available')
+            break
 
 
 async def get_available_matches(page, match_names):
@@ -595,21 +602,33 @@ async def select_random_match(page, match_list, reload_time):
     """
     print("[DEBUG] Selecting a random available match…")
     match_names = [m[0] for m in match_list]
-
+    
     while True:
-        available = await get_available_matches(page, match_names)
-        if not available:
-            print("[DEBUG] No available match – reloading after sleep")
-            time.sleep(random.randint(reload_time[0], reload_time[1]))
-            return False
+        if await check_for_element(page, '#seat_map_group'): 
+            team_spans = await check_for_elements(page, '.content_product_info > p.title span')
+            current_match_name = team_spans[0].text.strip() + ' vs ' + team_spans[2].text.strip()
+            if current_match_name in match_names: available = current_match_name
+            else:
+                print("[DEBUG] no available match - reloading after sleep")
+                time.sleep(random.randint(reload_time[0], reload_time[1]))
+                return False
+        else:
+            available = await get_available_matches(page, match_names)
+            if not available:
+                print("[DEBUG] No available match – reloading after sleep")
+                time.sleep(random.randint(reload_time[0], reload_time[1]))
+                return False
 
         # Pick a random match from the list of dicts
-        choice = random.choice(available)
-        match_key, li_handle = next(iter(choice.items()))
-        print(f"[DEBUG] Chosen match: {match_key}")
-        await li_handle.scroll_into_view()
-        await li_handle.mouse_click()
-        return match_key
+        if type(available) == str: return available
+        elif type(available) == list:
+            choice = random.choice(available)
+            match_key, li_handle = next(iter(choice.items()))
+            print(f"[DEBUG] Chosen match: {match_key}")
+            await li_handle.scroll_into_view()
+            await li_handle.mouse_click()
+            return match_key
+        
 
 
 async def get_categories_for_match(match_list, selected_match_key):
@@ -734,18 +753,28 @@ async def find_and_select_category(page, categories_dict, reload_time):
 
 async def find_and_select_category_resale2(page, categories_dict, reload_time):
     try:
-        for attempt in range(0, 10):
+        for attempt in range(1, 10):
             if await check_for_element(page, '#captcha_dialog'): return False
             print(f'[DEBUG]: {attempt}/10 attempt to find tickets')
             current_location = await get_location(page)
             if 'performanceId' not in current_location and 'productId' not in current_location:
                 print('[DEBUG]: returning to matches page...')
                 return False
+            desired_location = ''
             domain = 'https://' + current_location.split('https://')[1].split('/')[0]
             performance_id = current_location.split('performanceId=')[1].split('&')[0]
-            product_id = current_location.split('productId=')[1].split('&')[0]
+            product_id = None
+            try: product_id = current_location.split('productId=')[1].split('&')[0]
+            except: pass
+            if not product_id: 
+                section_with_product_id = await check_for_element(page, 'section[data-product-type="SPORTING_EVENT"]')
+                product_id = section_with_product_id.attrs.get('id').split('_')[1]
+
+
             desired_location = f'{domain}/ajax/resale/freeSeats?productId={product_id}&performanceId={performance_id}'
+
             print(desired_location, 'desired_location')
+
             categories_legend = await check_for_elements(page, '.seat-info-category-legend')
 
             categories_name = [(await check_for_element(category_legend, 'p > label > span:nth-child(2)')).text for category_legend in categories_legend]
@@ -966,6 +995,7 @@ async def finalize_booking(page, user_info, select_el=None):
             print("[DEBUG] Reset quantity to 0")
     else:
         print("[WARN] Booking may have failed (no success message)")
+
 
 async def reject_cookies(page):
     cookie_box = await custom_wait(page, 'div > #onetrust-reject-all-handler', timeout=3)
