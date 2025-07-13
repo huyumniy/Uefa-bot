@@ -525,7 +525,7 @@ async def click_buy_and_inner_buttons(page, actual_link):
     print("[DEBUG] Attempting to click Buy buttons…")
     while True:
         await reject_cookies(page)
-        if await get_location(page, 'https://www.uefa.com/'): await page.get(actual_link)
+        if await get_location(page) == 'https://www.uefa.com/': await page.get(actual_link)
         if await custom_wait(page, 'iframe[src^="https://geo.captcha-delivery.com"]', timeout=2):
             break
         try:
