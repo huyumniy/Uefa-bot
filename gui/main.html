@@ -92,7 +92,17 @@
         />
       </div>
 
-      <div class="input checkbox-input slackPushDesiredMatch">
+      <div class="input wait-for-input">
+        <h3>Почати роботу бота після введеного часу</h3>
+        <input
+          type="text"
+          id="wait-for-input"
+          name="wait-for-input"
+          placeholder="12:00"
+        />
+      </div>
+
+      <div class="checkbox-input slackPushDesiredMatch">
         <label for="slackPushDesiredMatch"
           >Надсилати пуш в слак, якщо знайдено матч</label
         >
@@ -102,7 +112,7 @@
           name="slackPushDesiredMatch"
         />
       </div>
-
+      
       <!-- Proxy Input -->
       <div class="inputs proxy-input">
         <h3>Proxy input:</h3>
@@ -179,6 +189,7 @@
             parseInt(reloadTimeTo) ? reloadTimeTo : 60
           );
           const initialLink = document.querySelector("#initialLink").value;
+          const waitFor = document.querySelector('#wait-for-input').value;
 
           const googleSheetsDataLinkInput = document.querySelector(
             "#googleSheetsDataLink"
@@ -223,6 +234,7 @@
             reloadTime,
             slackPushDesiredMatch,
             proxyList,
+            waitFor,
             adspowerApi,
             adspowerIds,
             googleSheetsDataLinkInput,

@@ -14,7 +14,7 @@ from utils.sheetsApi import GoogleSheetClient
 from utils.helpers import filter_by_dict_value
 from filtration import get_nearby_chains, get_random_chain_slice, find_nearby_chains
 from asyncio import iscoroutine, iscoroutinefunction
-from utils.helpers import extract_domain
+from utils.helpers import extract_domain, parse_time_string
 import logging
 import json
 import asyncio
@@ -22,6 +22,7 @@ import itertools
 import socket
 import eel
 from colorama import init, Fore
+from datetime import datetime
 
 init(autoreset=True)
 logger = logging.getLogger("uc.connection")
@@ -458,6 +459,9 @@ async def handle_captcha_dialog(page):
     Return True if we handled a captcha-dialog click; False otherwise.
     """
     try:
+        enter_button = await check_for_element(page, '#actionButtonSpan > :not([href]) > #actionButtonText')
+        if enter_button: await enter_button.click()
+
         captcha_form = await custom_wait(page, 'form[id="form_captcha"]', timeout=3)
         if captcha_form:
             print("[DEBUG] Captcha form detected—attempting to resolve")
@@ -465,7 +469,10 @@ async def handle_captcha_dialog(page):
             await button.click()
             # Wait for the “continue” button inside #action
             cont_btn = await custom_wait(page, '#action > #actionButtonSpan', timeout=10)
-            if cont_btn:
+            captcha_input = await check_for_element(page, '#secret')
+            non_empty_value = captcha_input.attrs.get('value')
+            print(non_empty_value)
+            if cont_btn and len(non_empty_value) > 0:
                 await cont_btn.click()
                 print("[DEBUG] Clicked continue on captcha dialog")
             return True
@@ -474,7 +481,7 @@ async def handle_captcha_dialog(page):
     return False
 
 
-async def wait_for_initial_page(page, actual_link, browser_id=None):
+async def wait_for_initial_page(page, actual_link, browser_id=None, parsed_date=None):
     """
     Navigate to actual_link and loop until we hit the “#isolated_header_iframe” marker.
     Handle login and captcha as needed.
@@ -486,14 +493,20 @@ async def wait_for_initial_page(page, actual_link, browser_id=None):
     # Loop until we find the “#isolated_header_iframe” marker
     while True:
         print("[DEBUG] Checking for main page load…")
-        print('get location', await get_location(page))
+        # Expiration check
+        if await check_for_element(page, 'div[aria-describedby="timeoutWRExpirationDialog"]'):
+            await remove_html_tag(page, 'div[aria-describedby="timeoutWRExpirationDialog"]')
+        if await check_for_element(page, 'div[class="ui-widget-overlay ui-front"]'):
+            await remove_html_tag(page, 'div[class="ui-widget-overlay ui-front"]')
+
+
         if await get_location(page) == "https://www.uefa.com/": await page.get(actual_link)
-        elif "access-ticketshop.uefa.com" in await get_location(page): time.sleep(15)
+        
         # First: check if login/captcha form is present
-        if await custom_wait(page, '#root_content', timeout=5):
+        if await custom_wait(page, '#root_content', timeout=2):
             await login_if_captcha(page)
             continue
-        if await custom_wait(page, 'iframe[src^="https://geo.captcha-delivery.com"]', timeout=2):
+        if await custom_wait(page, 'iframe[src^="https://geo.captcha-delivery.com"]', timeout=2) or await check_for_element(page, ''):
             user_part    = f"User: {os.getlogin()}."
             text = f"CAPTCHA"
             message = "\n".join([user_part + " " + browser_id, text])
@@ -502,6 +515,10 @@ async def wait_for_initial_page(page, actual_link, browser_id=None):
             # print('trying to delete cookies')
             # delete_cookies('datadome')
             print(Fore.YELLOW + f"{browser_id}: CAPTCHA!\n")
+
+        if parsed_date and parsed_date > datetime.now().time().replace(second=0, microsecond=0): 
+            print('Waiting for', parsed_date)
+            continue
 
         # Second: check for standalone captcha form
         if await handle_captcha_dialog(page):
@@ -524,10 +541,15 @@ async def click_buy_and_inner_buttons(page, actual_link):
     """
     print("[DEBUG] Attempting to click Buy buttons…")
     while True:
+        if await check_for_element(page, 'div[aria-describedby="timeoutWRExpirationDialog"]'):
+            await remove_html_tag(page, 'div[aria-describedby="timeoutWRExpirationDialog"]')
+        if await check_for_element(page, 'div[class="ui-widget-overlay ui-front"]'):
+            await remove_html_tag(page, 'div[class="ui-widget-overlay ui-front"]')
         await reject_cookies(page)
         if await get_location(page) == 'https://www.uefa.com/': await page.get(actual_link)
         if await custom_wait(page, 'iframe[src^="https://geo.captcha-delivery.com"]', timeout=2):
             break
+        await handle_captcha_dialog(page)
         try:
             buy_button = await custom_wait(page, "a.btn-main", timeout=2)
             if buy_button:
@@ -1007,7 +1029,7 @@ async def reject_cookies(page):
 
 async def main(
     initial_link, browser_id, total_browsers,
-    reload_time, slack_push_desired_match=None, proxy_list=None,
+    reload_time, waitFor, slack_push_desired_match=None, proxy_list=None,
     adspower_api=None, adspower_id=None
 ):
     """
@@ -1029,9 +1051,13 @@ async def main(
     browser_part = f"Browser: {adspower_id if adspower_id else browser_id}"
     user_part    = f"User: {os.getlogin()}."
     user_info = "\n".join([user_part + " " + browser_part])
+    parsed_date = None
+    if waitFor:
+        parsed_date = parse_time_string(waitFor)
+
     while True:
         try:
-            await wait_for_initial_page(page, actual_link, browser_id=browser_part)
+            await wait_for_initial_page(page, actual_link, browser_part, parsed_date)
 
             # Step: click buy buttons until performance container appears
             await click_buy_and_inner_buttons(page, actual_link)
@@ -1117,7 +1143,7 @@ def poll_sheet_every(interval: float, sheets_data_link: str, sheets_accounts_lin
 
 @eel.expose
 def start_workers(initial_link, browsersAmount, reload_time,
-    slack_push_desired_match, proxyInput, adspowerApi, 
+    slack_push_desired_match, proxyInput, waitFor, adspowerApi, 
     adspowerIds, googleSheetsDataLink=None, googleSheetsAccountsLink=None,
 ):
     if googleSheetsAccountsLink:
@@ -1129,7 +1155,7 @@ def start_workers(initial_link, browsersAmount, reload_time,
         polling_thread.start()
     
     threads = []
-    print('start_workers', initial_link, browsersAmount, reload_time,
+    print('start_workers', initial_link, browsersAmount, reload_time, waitFor,
      slack_push_desired_match, adspowerApi,adspowerIds,
      googleSheetsDataLink, googleSheetsAccountsLink)
 
@@ -1142,7 +1168,7 @@ def start_workers(initial_link, browsersAmount, reload_time,
             thread = threading.Thread(
                 target=lambda idx=i, tot=total, aid=ads_id:
                     uc.loop().run_until_complete(
-                        main(initial_link, idx, tot, reload_time, slack_push_desired_match, proxyInput, adspowerApi, aid)
+                        main(initial_link, idx, tot, reload_time, waitFor, slack_push_desired_match, proxyInput, adspowerApi, aid)
                     )
             )
             threads.append(thread)
@@ -1156,7 +1182,7 @@ def start_workers(initial_link, browsersAmount, reload_time,
             thread = threading.Thread(
                 target=lambda idx=i, tot=total:
                     uc.loop().run_until_complete(
-                        main(initial_link, idx, tot, reload_time, slack_push_desired_match, proxyInput,)
+                        main(initial_link, idx, tot, reload_time, waitFor, slack_push_desired_match, proxyInput,)
                     )
             )
             threads.append(thread)
@@ -1264,6 +1290,22 @@ async def submitPayload(page, selector: str, params: dict):
     }})("{selector}", {params_json});
     """
     await page.evaluate(script)
+
+async def remove_html_tag(page, selector):
+    
+    script = f"""
+    (function(selector) {{
+        const element = document.querySelector(selector);
+        element.remove();
+    }}("{selector}"))
+    """
+
+    result = await driver.evaluate(
+        script,
+        await_promise=True,
+        return_by_value=True
+    )
+    return result
 
 
 if __name__ == "__main__":

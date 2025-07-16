@@ -66,10 +66,13 @@ input {
 .checkbox-input {
   display: flex;
   align-items: center;
+  justify-content: center;
+  gap: 10px;
 }
 
 .checkbox-input input {
   height: fit-content;
+  width: fit-content;
 }
 
 .buttons {
@@ -349,4 +352,11 @@ h3 {
   border-radius: 10px;
   font-size: 16px;
   color: #0f2027;
+}
+
+.input {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
 }
